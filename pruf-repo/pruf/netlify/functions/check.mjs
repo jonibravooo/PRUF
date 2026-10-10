@@ -145,7 +145,8 @@ async function siteForensics(url){
   const scripts = [...new Set(srcs)].slice(0, 8);
   const inline = [...html.matchAll(/<script(?![^>]*src=)[^>]*>([\s\S]*?)<\/script>/gi)].map(m => m[1]).join("\n");
   const bundles = await Promise.allSettled(scripts.map(s => req(s, { json: false, ms: 8000, maxBytes: 4e6 })));
-  let code = inline + "\n" + html.slice(0, 200000);
+  let code = html.slice(0, 400000);
+  void inline;
   let bytes = 0;
   bundles.forEach(b => { if (b.status === "fulfilled"){ code += "\n" + b.value; bytes += b.value.length; } });
 
@@ -170,7 +171,11 @@ async function siteForensics(url){
   if (/service_role/.test(code)) secrets.push("Supabase service_role key");
   out.leakedSecrets = secrets;
 
-  const rand = [...code.matchAll(/Math\.random\(\)/g)];
+  const inString = i => {
+    const line = code.slice(code.lastIndexOf("\n", i) + 1, i);
+    return ['"', "'", "`"].some(q => (line.split(q).length - 1) % 2 === 1);
+  };
+  const rand = [...code.matchAll(/Math\.random\(\)/g)].filter(m => !inString(m.index));
   out.mathRandomTotal = rand.length;
   const snippets = [];
   for (const m of rand.slice(0, 80)){
