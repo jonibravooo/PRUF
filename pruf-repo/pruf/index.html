@@ -292,7 +292,6 @@ footer .src:hover{color:var(--accent)}
       <input id="q" placeholder="Paste a CA or website" spellcheck="false" autocapitalize="off" autocomplete="off">
       <button type="submit" class="primary" id="run">Check <span aria-hidden="true">→</span></button>
     </div>
-    <div class="field" id="code-field" hidden><label for="code">Access code</label><input id="code" placeholder="Beta access code" autocapitalize="off"></div>
     <div class="status" id="status" aria-live="polite"></div>
   </form>
 
@@ -350,22 +349,22 @@ function renderEmpty(){
 // A fictional example so visitors can see a full report before pasting anything.
 const EXAMPLE = {
   facts: { ca:"ExAmpLe1111111111111111111111111111111pump", chain:"solana", token:{ name:"Agent Coin (example)", symbol:"AGNT", image:null }, website:"https://example-agent.fun/", x:null,
-    tech:{ builder:"Lovable", stack:["Solana wallet connect","Supabase backend"], signsTransactions:true,
+    tech:{ builder:"a no-code site builder", stack:["Solana wallet connect","Supabase backend"], signsTransactions:true,
       programs:[{ address:"Fg6PaFpoGXkYsidMpWTK6W2BeZ7FEfcYkg476zPFsLnS", lines:["Deployed 3 days ago","0 recent txs","Team can change the code","No verified build"], tone:"bad" }], wallets:[], usesKnown:["PumpSwap program"],
       flags:[{ tone:"bad", text:"2 places where on-screen numbers may be generated with Math.random()" }],
       launch:{ via:"pump.fun", created:null }, github:{ commits:1, authors:1, hasPrograms:true, isFork:false } },
     basics:[], sources:[], misses:[] },
   report: { verdict:"busted", score:15, headline:"AI agent exists on paper, never used",
-    summary:"Program is deployed but has 0 txs. Live volume is Math.random(). Treasury address doesn't exist.",
+    summary:"Program is deployed but has 0 txs. Live volume is random numbers. Treasury address doesn't exist.",
     claims:[
       { claim:"AI agent trades 24/7", status:"busted", evidence:"Their program: deployed 3 days ago, 0 txs since.", how_to_check:"Solscan → program → Transactions" },
-      { claim:"Live trading volume", status:"busted", evidence:"Site adds Math.random()*900 to the counter every second.", how_to_check:"Refresh twice, numbers won't match" },
+      { claim:"Live trading volume", status:"busted", evidence:"Site adds a random number to the counter every second.", how_to_check:"Refresh twice, numbers won't match" },
       { claim:"Buybacks from agent profits", status:"no_evidence", evidence:"No buyback wallet anywhere. Treasury in docs doesn't exist.", how_to_check:"Can't check from outside" },
       { claim:"Trade history in the app", status:"trust", evidence:"Pulled from their private database, not from chain.", how_to_check:"Can't check from outside" },
       { claim:"Fair launch on pump.fun", status:"proven", evidence:"Launched on pump.fun, mint and freeze revoked.", how_to_check:"Solscan → token → Mint authority" }],
     custody:{ keys:"Team can change the program", fees:"Unknown", funds:"No deposits" },
     red_flags:["Fake live counters","Unused program","Missing treasury"], green_flags:["Authorities revoked"],
-    post:"Checked $AGNT: 'AI agent' program has 0 txs, live volume is Math.random(), treasury doesn't exist. Cap." }
+    post:"Checked $AGNT: 'AI agent' program has 0 txs, live volume is random numbers, treasury doesn't exist. Cap." }
 };
 
 function explorerLinks(ca, chain){
@@ -527,14 +526,14 @@ function status(msg, isErr, spinning){
   if (msg) s.append(msg);
 }
 
-try { const c = localStorage.getItem("pruf-code"); if (c) $("code").value = c; } catch {}
+let savedCode = ""; try { savedCode = localStorage.getItem("pruf-code") || ""; } catch {}
 
 $("form").addEventListener("submit", async e => {
   e.preventDefault();
   const q = $("q").value.trim();
   if (!q){ status("Paste a contract address or a website.", true); $("q").focus(); return; }
   const isAddr = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(q) || /^0x[a-fA-F0-9]{40}$/.test(q);
-  const body = { ca: isAddr ? q : "", website: isAddr ? "" : q, code:$("code").value.trim() };
+  const body = { ca: isAddr ? q : "", website: isAddr ? "" : q, code: ($("code")?.value.trim() || savedCode) };
   $("run").disabled = true;
   status("Starting…", false, true);
   facts = null;
@@ -557,7 +556,8 @@ $("form").addEventListener("submit", async e => {
         else if (ev.t === "report"){ gotReport = true; renderReport(ev.data); status(""); }
         else if (ev.t === "error"){
           if (ev.code === "access"){
-            const cf = $("code-field"); cf.hidden = false;
+            let cf = $("code-field");
+            if (!cf){ cf = el("div",{class:"field",id:"code-field"}, el("label",{for:"code",text:"Code"}), el("input",{id:"code",autocapitalize:"off"})); $("status").before(cf); }
             if (!cf.querySelector(".peek")) cf.append(el("img",{class:"peek",src:"/assets/prufy-code.webp",alt:"",width:64,height:64}));
             $("code").focus();
           }
