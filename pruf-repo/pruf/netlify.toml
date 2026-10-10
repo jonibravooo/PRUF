@@ -1,0 +1,4 @@
+[build]
+  publish = "."
+  functions = "netlify/functions"
+  command = "node scripts/stamp.mjs"
