@@ -64,6 +64,8 @@ function safeUrl(u){
   } catch { return null; }
 }
 
+// A link to a single post (x.com/someone/status/123) is a narrative SOURCE, not the project's account.
+const isPostLink = u => /(?:x|twitter)\.com\/[A-Za-z0-9_]{1,15}\/status\/\d+/i.test(String(u || ""));
 function xHandle(s){
   if (!s) return null;
   s = String(s).trim();
@@ -164,6 +166,9 @@ async function siteForensics(url){
   bundles.forEach(b => { if (b.status === "fulfilled"){ code += "\n" + b.value; bytes += b.value.length; } });
 
   const out = { scriptsRead: bundles.filter(b => b.status === "fulfilled").length, codeKB: Math.round(bytes / 1024) };
+  // Fingerprint of the app's main bundle: identical hash = the exact same site code (reused / cloned site).
+  const big = bundles.filter(b => b.status === "fulfilled" && b.value.length > 20000).map(b => b.value).sort((a, b) => b.length - a.length)[0];
+  if (big) out.codeHash = createHash("sha1").update(big).digest("hex").slice(0, 16);
   out.builder = (BUILDERS.find(([, re]) => re.test(code)) || [null])[0];
   out.libraries = LIBS.filter(([, re]) => re.test(code)).map(([n]) => n);
   out.services = SERVICES.filter(([, re]) => re.test(code)).map(([n]) => n);
@@ -296,6 +301,42 @@ async function probeSolana(addrs){
   return out;
 }
 
+// ---------- CA on GitHub: "listed in the Solana Foundation repo" style claims ----------
+// Searches all public code + all issues/PRs for the exact CA. Code search needs GITHUB_TOKEN; issues work without.
+const OFFICIAL_ORGS = /^(solana-foundation|solana-labs|anza-xyz|solana-developers|solana-program|jito-foundation|metaplex-foundation)$/i;
+// Where in a file the CA sits matters more than which org owns the repo: sample API responses, test fixtures and
+// scraped token lists are not endorsements.
+const SAMPLE_PATH = /(openapi|swagger|spec|schema|example|sample|fixture|mock|test|__tests__|seed|snapshot|cache|dump|scrape)/i;
+const SAMPLE_TEXT = /"(example|examples|sample|mock|fixture)"\s*:|components\/schemas|"included"\s*:|"relationships"\s*:|"top_pools"|"price_usd"|"fdv_usd"|"volume_usd"|"launchpad_details"/i;
+async function githubMentions(ca){
+  const H = { accept: "application/vnd.github+json" };
+  if (process.env.GITHUB_TOKEN) H.authorization = "Bearer " + process.env.GITHUB_TOKEN;
+  const q = encodeURIComponent(`"${ca}"`);
+  const [code, iss] = await Promise.allSettled([
+    H.authorization ? req(`https://api.github.com/search/code?q=${q}&per_page=10`, { headers: { ...H, accept: "application/vnd.github.text-match+json" }, ms: 7000 }) : Promise.reject(new Error("no token")),
+    req(`https://api.github.com/search/issues?q=${q}&per_page=10`, { headers: H, ms: 7000 }),
+  ]);
+  const out = { searched: [], code: [], prs: [] };
+  if (code.status === "fulfilled"){
+    out.searched.push("all public code");
+    out.codeTotal = code.value.total_count || 0;
+    out.code = (code.value.items || []).map(i => {
+      const context = (i.text_matches || []).map(m => m.fragment).join(" … ").slice(0, 400);
+      const sample = SAMPLE_PATH.test(i.path || "") || SAMPLE_TEXT.test(context);
+      return { repo: i.repository?.full_name, path: i.path, url: i.html_url, official: OFFICIAL_ORGS.test(i.repository?.owner?.login || ""), looksLikeSampleData: sample, context };
+    });
+  }
+  if (iss.status === "fulfilled"){
+    out.searched.push("all issues & pull requests");
+    out.prTotal = iss.value.total_count || 0;
+    out.prs = (iss.value.items || []).map(i => {
+      const repo = (i.repository_url || "").split("/repos/")[1] || "";
+      return { repo, title: String(i.title || "").slice(0, 120), url: i.html_url, isPR: !!i.pull_request, state: i.state, merged: !!i.pull_request?.merged_at, by: i.user?.login, official: OFFICIAL_ORGS.test(repo.split("/")[0]) };
+    });
+  }
+  return out.searched.length ? out : null;
+}
+
 // ---------- 3. GitHub deep read ----------
 async function githubDeep(links){
   const headers = { accept: "application/vnd.github+json" };
@@ -408,6 +449,9 @@ async function tokenMeta(ca){
     out.twitter ||= j.twitter || ext.twitter || null;
     out.telegram ||= j.telegram || ext.telegram || null;
     out.description ||= j.description || null;
+    out.name ||= typeof j.name === "string" ? j.name : null;
+    out.symbol ||= typeof j.symbol === "string" ? j.symbol : null;
+    out.image ||= typeof j.image === "string" ? j.image : typeof j.image_uri === "string" ? j.image_uri : null;
     // Every launchpad names these fields differently (socials[], links{}, extensions{}…),
     // so also scan the whole JSON for links and sort them by domain.
     const urls = [];
@@ -612,9 +656,16 @@ async function devFunding(dev, oldestSigs){
 async function launchBlock(ca, sigs, dev, supply){
   const txs = await heliusParse(sigs);
   const curve = (() => { try { return pda([Buffer.from("bonding-curve"), b58dec(ca)], PUMP); } catch { return null; } })();
+  // The pool = whoever SENDS the most tokens in this block (pump.fun curve, LaunchLab / Meteora vault…).
+  // Mints into the vault have no sender and are skipped, so the vault is never counted as a "buyer".
+  const outflow = {};
+  for (const t of txs) for (const x of t.tokenTransfers || []){
+    if (x.mint === ca && x.fromUserAccount) outflow[x.fromUserAccount] = (outflow[x.fromUserAccount] || 0) + (Number(x.tokenAmount) || 0);
+  }
+  const pool = curve && outflow[curve] ? curve : Object.entries(outflow).sort((a, b) => b[1] - a[1])[0]?.[0];
   const got = {};
   for (const t of txs) for (const x of t.tokenTransfers || []){
-    if (x.mint !== ca || !x.toUserAccount || x.toUserAccount === curve) continue;
+    if (x.mint !== ca || !x.toUserAccount || x.fromUserAccount !== pool || x.toUserAccount === pool) continue;
     got[x.toUserAccount] = (got[x.toUserAccount] || 0) + (Number(x.tokenAmount) || 0);
   }
   const others = Object.entries(got).filter(([w]) => w !== dev).sort((a, b) => b[1] - a[1]);
@@ -729,10 +780,12 @@ function pda(seeds, programId){
 const hasDisc = (d, disc) => d.length >= 8 && disc.every((x, i) => d[i] === x);
 async function creatorFees(ca, market){
   const curve = pda([Buffer.from("bonding-curve"), b58dec(ca)], PUMP);
+  // Holder-rewards coins point their creator at this PDA (pump.fun pays the fees out to holders).
+  const holderPda = pda([Buffer.from("holder-rewards"), b58dec(ca)], PUMP);
   const pool = market?.pumpswapPair || null;
   const res = await rpc("getMultipleAccounts", [[curve, pool].filter(Boolean), { encoding: "base64" }]);
   const cv = res?.value?.[0], pv = pool ? res?.value?.[1] : null;
-  const out = { venue: null, recipient: null, graduated: null, holderRewards: false, cashback: false, curve };
+  const out = { venue: null, recipient: null, graduated: null, holderRewards: false, cashback: false, curve, holderPda };
   let rcpt = null;
   if (cv?.owner === PUMP){
     const d = b64(cv.data[0]);
@@ -753,7 +806,13 @@ async function creatorFees(ca, market){
   }
   if (!rcpt || rcpt === SYSTEM) return out.venue ? { ...out, kind: "none" } : null;
   out.recipient = rcpt;
-  if (out.holderRewards){ out.kind = "holders"; return out; }
+  if (rcpt === holderPda) out.holderRewards = true;
+  if (out.holderRewards){
+    out.kind = "holders";
+    // SOL sitting on the PDA = fees collected but not paid out to holders yet.
+    try { const a = (await rpc("getMultipleAccounts", [[holderPda], { encoding: "base64", dataSlice: { offset: 0, length: 0 } }]))?.value?.[0]; if (a) out.pendingSol = Math.round(a.lamports / 1e7) / 100; } catch {}
+    return out;
+  }
   const acc = (await rpc("getMultipleAccounts", [[rcpt], { encoding: "base64" }]))?.value?.[0];
   if (acc?.owner === PUMP_FEES){
     const d = b64(acc.data[0]);
@@ -772,7 +831,7 @@ async function creatorFees(ca, market){
 function labelFees(fees, dev){
   if (!fees) return fees;
   fees.devKnown = !!dev;
-  const label = a => a === dev ? "dev wallet" : ECOSYSTEM.find(e => (e.addr || []).includes(a))?.name || KNOWN[a] || null;
+  const label = a => a === fees.holderPda ? "holders (pump.fun holder rewards)" : a === dev ? "dev wallet" : ECOSYSTEM.find(e => (e.addr || []).includes(a))?.name || KNOWN[a] || null;
   if (fees.recipient) fees.label = label(fees.recipient);
   if (fees.owner) fees.ownerLabel = label(fees.owner);
   (fees.shares || []).forEach(s => { s.label = label(s.address); });
@@ -859,6 +918,79 @@ function busiestPost(x){
   return fresh[0]?.replies >= 3 ? fresh[0] : null;
 }
 
+// ---------- narrative investigation: OG or copycat, does the source exist, did the named account ever mention it ----------
+const normName = x => String(x || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+// IPFS content id of an image URL: the same file always has the same CID, so a copied image is caught exactly.
+const imageCid = u => (String(u || "").match(/(?:ipfs\/|ipfs:\/\/)((?:Qm[1-9A-HJ-NP-Za-km-z]{44})|(?:bafy[a-z2-7]{50,}))/) || [])[1] || null;
+async function ogCheck(ca, name, symbol, myCreated, myImage){
+  const S = normName(symbol), N = normName(name);
+  if (!S && !N) return null;
+  const toks = {};
+  const myCid = imageCid(myImage);
+  const sameImg = {};
+  const add = (mint, sym, nm, created, mc, img) => {
+    if (mint && mint !== ca && myCid && imageCid(img) === myCid) sameImg[mint] = { mint, symbol: sym, name: nm, createdAt: created || null, mc: Number(mc) || 0 };
+    if (!mint || !((S && normName(sym) === S) || (N.length >= 3 && normName(nm) === N))) return;
+    const t = toks[mint] ||= { mint, symbol: sym, name: nm, createdAt: Infinity, mc: 0 };
+    if (created) t.createdAt = Math.min(t.createdAt, created);
+    t.mc = Math.max(t.mc, Number(mc) || 0);
+  };
+  const H = { accept: "application/json", origin: "https://pump.fun", referer: "https://pump.fun/" };
+  const term = symbol || name;
+  const [d1, d2, pf] = await Promise.allSettled([
+    req(`https://api.dexscreener.com/latest/dex/search?q=${encodeURIComponent(symbol || name)}`, { ms: 6000 }),
+    name && symbol && N !== S ? req(`https://api.dexscreener.com/latest/dex/search?q=${encodeURIComponent(name)}`, { ms: 6000 }) : Promise.resolve(null),
+    req(`https://frontend-api-v3.pump.fun/coins?searchTerm=${encodeURIComponent(term)}&offset=0&limit=50&sort=created_timestamp&order=ASC&includeNsfw=true`, { ms: 5000, headers: H }),
+  ]);
+  for (const d of [d1, d2]) if (d.status === "fulfilled" && d.value) for (const p of d.value.pairs || []){
+    if (p.chainId !== "solana") continue;
+    add(p.baseToken?.address, p.baseToken?.symbol, p.baseToken?.name, p.pairCreatedAt, p.marketCap ?? p.fdv);
+  }
+  if (pf.status === "fulfilled") for (const c of (Array.isArray(pf.value) ? pf.value : pf.value?.coins || [])) add(c.mint, c.symbol, c.name, c.created_timestamp, c.usd_market_cap, c.image_uri);
+  const list = Object.values(toks);
+  const me = toks[ca];
+  const mine = me && isFinite(me.createdAt) ? me.createdAt : myCreated || null;
+  const others = list.filter(t => t.mint !== ca);
+  const older = mine ? others.filter(t => isFinite(t.createdAt) && t.createdAt < mine).sort((a, b) => a.createdAt - b.createdAt) : [];
+  const biggest = [...others].sort((a, b) => b.mc - a.mc)[0] || null;
+  const imgCopies = Object.values(sameImg).sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+  return { imageCid: myCid, sameImage: imgCopies.slice(0, 5), sameImageOlder: mine ? imgCopies.filter(t => t.createdAt && t.createdAt < mine).length : null, sameNameOrTicker: others.length, og: !others.length ? true : mine ? !older.length : null, olderCount: older.length, oldest: older[0] || null, biggest, myMc: me?.mc || null, searched: "DexScreener + pump.fun search (Solana)" };
+}
+// Posts the coin points to (metadata X field, description, site, the project's own posts): who wrote them and when.
+async function narrativeSources(texts, skipId){
+  const ids = new Map();
+  for (const t of texts) for (const m of String(t || "").matchAll(/(?:x|twitter)\.com\/([A-Za-z0-9_]{1,15})\/status\/(\d{6,25})/gi)){
+    if (m[2] !== skipId && !ids.has(m[2]) && ids.size < 3) ids.set(m[2], m[1]);
+  }
+  const res = await Promise.allSettled([...ids.keys()].map(async id => ({ id, ...(await readTweet(id)) })));
+  return res.filter(r => r.status === "fulfilled" && r.value.text).map(r => ({ url: `x.com/${r.value.handle}/status/${r.value.id}`, by: r.value.handle, at: r.value.at, text: String(r.value.text).slice(0, 300) }));
+}
+// Did this account ever post the CA or the ticker? (X recent search = last 7 days.)
+async function xMentions(handle, ca, symbol){
+  const tok = xToken();
+  if (!tok || !handle) return null;
+  if (!ca && !symbol) return null;
+  const terms = [ca ? `"${ca}"` : null, symbol && /^[A-Za-z0-9]{2,12}$/.test(symbol) ? `"$${symbol}"` : null].filter(Boolean).join(" OR ");
+  const q = encodeURIComponent(`from:${handle} (${terms})`);
+  const j = await req(`https://api.x.com/2/tweets/search/recent?query=${q}&max_results=10&tweet.fields=created_at`, { headers: { authorization: `Bearer ${tok}` }, ms: 7000 });
+  return { handle, posts: (j?.data || []).length, examples: (j?.data || []).slice(0, 2).map(t => ({ at: t.created_at, text: String(t.text).slice(0, 200) })), window: "last 7 days" };
+}
+
+// Who's been posting the CA on X (last 7 days). Simple on purpose: accounts + reach. X_MAX_SHILLS (default 10, 0 = off).
+async function xCaPosts(ca){
+  const tok = xToken(); const n = Number(process.env.X_MAX_SHILLS ?? 10);
+  if (!tok || !(n > 0)) return null;
+  const q = encodeURIComponent(`"${ca}" -is:retweet`);
+  const j = await req(`https://api.x.com/2/tweets/search/recent?query=${q}&max_results=${Math.min(100, Math.max(10, n))}&tweet.fields=created_at,author_id&expansions=author_id&user.fields=username,public_metrics`, { headers: { authorization: `Bearer ${tok}` }, ms: 7000 });
+  const users = Object.fromEntries((j?.includes?.users || []).map(u => [u.id, u]));
+  const posts = (j?.data || []).map(t => ({ by: users[t.author_id]?.username || "?", followers: users[t.author_id]?.public_metrics?.followers_count ?? 0, at: t.created_at }));
+  const acc = {};
+  posts.forEach(p => { acc[p.by] = acc[p.by] || { handle: p.by, followers: p.followers, posts: 0 }; acc[p.by].posts++; });
+  const accounts = Object.values(acc).sort((a, b) => b.followers - a.followers);
+  const first = posts.map(p => p.at).filter(Boolean).sort()[0] || null;
+  return { sampled: posts.length, more: !!j?.meta?.next_token, accounts: accounts.slice(0, 6), accountCount: accounts.length, firstSeen: first, window: "last 7 days" };
+}
+
 async function domainAge(url){
   const domain = new URL(url).hostname.replace(/^www\./, "").split(".").slice(-2).join(".");
   const j = await req(`https://rdap.org/domain/${domain}`, { headers: { accept: "application/rdap+json" } });
@@ -893,7 +1025,7 @@ function feesCard(fe){
   const who = (a, l) => l || short(a);
   const src = `Read on-chain from the ${fe.venue} ${fe.venue === "PumpSwap" ? "pool" : "bonding curve"}`;
   let title, tone = "info"; const lines = [];
-  if (fe.kind === "holders"){ title = "Creator fees → holders"; tone = "good"; lines.push("Holder-rewards coin: pump.fun pays the fees to holders, no creator wallet"); }
+  if (fe.kind === "holders"){ title = "Creator fees → holders"; tone = "good"; lines.push("Holder-rewards coin: pump.fun pays the fees to holders, no creator wallet"); if (fe.pendingSol > 0) lines.push(`${fe.pendingSol} SOL collected, waiting for the next payout`); }
   else if (fe.kind === "none"){ title = "No creator-fee recipient set"; }
   else if (fe.kind === "wallet"){
     title = fe.label === "dev wallet" ? "Creator fees → the dev wallet" : `Creator fees → ${fe.label || (fe.devKnown ? "another wallet, not the dev" : "this wallet")}`;
@@ -938,7 +1070,10 @@ function techSummary(f){
   const d = L.dev;
   const progLabel = L.launchProgram && !isSol(L.launchProgram) ? L.launchProgram.replace(/ program$/, "") : null;
   const via = L.launchpad?.name ? L.launchpad.name + (progLabel && !progLabel.toLowerCase().includes(L.launchpad.name.toLowerCase()) ? ` (on ${progLabel})` : "") : (progLabel || L.launchProgram);
-  const launch = via ? { via, created: L.createdAt } : null;
+  // The launch model matters as much as the venue: who gets the trading fees.
+  const fe = f.fees;
+  const model = fe?.kind === "holders" ? "holder rewards" : fe?.cashback ? "cashback" : fe?.kind === "split" ? "fee sharing" : null;
+  const launch = via ? { via, created: L.createdAt, model } : null;
   const supply = f.mint?.supply || null;
   const tr = d?.trades, fu = d?.funding, lb = L.launchBlock;
   const soldShare = tr?.bought > 0 ? Math.min(1, tr.sold / tr.bought) : null;
@@ -962,6 +1097,44 @@ function techSummary(f){
   if (soldShare >= 0.97) flags.push({ tone: "warn", text: "Dev already sold their whole bag" });
   if (fu?.funderLaunched >= 3) flags.push({ tone: "warn", text: `Dev wallet was funded by a wallet that launched ${fu.funderLaunched} coins — likely the same dev` });
   if (lb?.otherPct >= 10) flags.push({ tone: lb.stillHoldPct >= 5 ? "bad" : "warn", text: `${lb.wallets} wallet${lb.wallets === 1 ? "" : "s"} bought ${pct(lb.otherPct)} in the launch block (bundle)` + (lb.stillHoldPct != null ? `, still holding ${pct(lb.stillHoldPct)}` : "") });
+  // Narrative: OG or copycat, the posts it points to, and whether the named accounts ever mentioned it.
+  const og = f.og, nv = f.narrative || {};
+  const created = isFinite(f.market?.createdAt) ? f.market.createdAt : (L.createdAt ? Date.parse(L.createdAt) : null);
+  const nLines = [];
+  if (og){
+    if (!og.sameNameOrTicker) nLines.push("Only token with this name/ticker on Solana");
+    else if (og.og === null) nLines.push(`${og.sameNameOrTicker} other token${og.sameNameOrTicker === 1 ? "" : "s"} share this name/ticker (couldn't date this one)`);
+    else if (og.og) nLines.push(`OG: the first of ${og.sameNameOrTicker + 1} tokens with this name/ticker`);
+    else nLines.push(`Not the OG: ${og.olderCount} older token${og.olderCount === 1 ? "" : "s"} with this name/ticker, first one ${ago(og.oldest.createdAt)} ago` + (og.oldest.mc ? ` (now ${usd(og.oldest.mc)})` : ""));
+    if (og.biggest && og.biggest.mc > Math.max(2 * (og.myMc || f.market?.marketCap || 0), 50000)) nLines.push(`Biggest one with this name: ${usd(og.biggest.mc)} (${short(og.biggest.mint)})`);
+  }
+  (nv.sources || []).forEach(src => {
+    const t = Date.parse(src.at);
+    nLines.push(`Points to a post by @${src.by}` + (isFinite(t) && created ? (t < created ? `, posted ${ago(Date.now() - (created - t))} before the coin` : ", posted after the coin launched") : ""));
+  });
+  (nv.mentions || []).forEach(m => nLines.push(m.posts ? `@${m.handle} posted the CA/ticker ${m.posts} time${m.posts === 1 ? "" : "s"} (last 7 days)` : `@${m.handle} never posted the CA or ticker (last 7 days)`));
+  if (og?.sameImage?.length) nLines.push(`Same image file as ${og.sameImage.length} other token${og.sameImage.length === 1 ? "" : "s"}` + (og.sameImageOlder ? ` (${og.sameImageOlder} older)` : "") + `: ${og.sameImage.slice(0, 2).map(t => "$" + (t.symbol || short(t.mint))).join(", ")}`);
+  const cp = f.caPosts;
+  if (cp) nLines.push(cp.accountCount ? `${cp.accountCount}${cp.more ? "+" : ""} account${cp.accountCount === 1 ? "" : "s"} posted the CA (last 7 days)` + (cp.accounts[0]?.followers ? ` · biggest @${cp.accounts[0].handle} (${Number(cp.accounts[0].followers).toLocaleString("en")})` : "") : "Nobody posted the CA on X (last 7 days)");
+  const narrativeCard = nLines.length ? { title: "Narrative", lines: nLines, tone: og && og.og === false && og.biggest?.mc > (og.myMc || 0) * 2 ? "warn" : "info" } : null;
+  if (og?.sameImageOlder) flags.push({ tone: "warn", text: `Token image is the exact same file as ${og.sameImageOlder} older token${og.sameImageOlder === 1 ? "" : "s"} — copied art` });
+  // Prufy's memory
+  const VN = { proven: "Real", trust: "Trust me bro", busted: "Cap", no_evidence: "Vapor" };
+  const mem = f.memory || {};
+  const fmt = list => list.slice(0, 3).map(e => `${e.title} (${VN[e.verdict] || e.verdict}${e.score != null ? " " + e.score + "%" : ""})`).join(", ");
+  const bad = list => (list || []).filter(e => e.verdict === "busted" || e.verdict === "no_evidence");
+  const mLines = [];
+  if (mem.dev) mLines.push(`Dev seen in ${mem.dev.length} earlier check${mem.dev.length === 1 ? "" : "s"}: ${fmt(mem.dev)}`);
+  if (mem.funderAsDev) mLines.push(`The dev's funder was itself a dev PRUF checked: ${fmt(mem.funderAsDev)}`);
+  if (mem.funder) mLines.push(`Same funder as: ${fmt(mem.funder)}`);
+  if (mem.site) mLines.push(`Exact same site code as: ${fmt(mem.site)}`);
+  if (mem.img) mLines.push(`Exact same image as: ${fmt(mem.img)}`);
+  if (mem.fee) mLines.push(`Same fee wallet as: ${fmt(mem.fee)}`);
+  const memBad = [...bad(mem.dev), ...bad(mem.funderAsDev), ...bad(mem.funder)];
+  const memoryCard = mLines.length ? { title: "Prufy's memory", lines: mLines, tone: memBad.length ? "bad" : (mem.site || mem.img) ? "warn" : "good" } : null;
+  if (memBad.length) flags.push({ tone: "bad", text: `PRUF has seen this dev before: ${fmt(memBad)}` });
+  if (mem.site) flags.push({ tone: "warn", text: `Cloned site: exact same code as ${fmt(mem.site)}` });
+  if (og && og.og === false && og.oldest) flags.push({ tone: "warn", text: `Not the OG: an older $${og.oldest.symbol || "token"} with the same name exists` + (og.oldest.mc ? ` (${usd(og.oldest.mc)})` : "") });
   const blockCard = lb ? {
     title: "Launch block",
     lines: [
@@ -975,7 +1148,7 @@ function techSummary(f){
   const oc = d?.otherCoins;
   if (oc?.count >= 5 && !oc.graduated && !(oc.best?.mc > 100000)) flags.push({ tone: "warn", text: `Dev launched ${oc.count} coins before and none took off` });
   return {
-    launch, dev: devCard, fees: feesCard(f.fees), block: blockCard,
+    launch, dev: devCard, fees: feesCard(f.fees), block: blockCard, narrative: narrativeCard, memory: memoryCard,
     builder: s.builder || null,
     stack: [...(s.libraries || []), ...(s.services || [])],
     signsTransactions: !!s.signsTransactions,
@@ -1000,10 +1173,21 @@ function buildPrompt(f){
     offchain_backend_verification: f.backend || "site doesn't call a server of its own",
     market_context_platforms_detected: f.ecosystem?.length ? f.ecosystem : "none detected",
     creator_fees_onchain: f.fees || "not a pump.fun / PumpSwap token, or couldn't read it",
+    narrative_checks: { og_or_copycat: f.og || "not checked", posts_the_coin_points_to: f.narrative?.sources?.length ? f.narrative.sources : "none found", did_named_accounts_mention_it: f.narrative?.mentions?.length ? f.narrative.mentions : "not checked", token_created: f.market?.createdAt && isFinite(f.market.createdAt) ? new Date(f.market.createdAt).toISOString() : f.launch?.createdAt || null },
+    x_posts_with_this_ca: f.caPosts || "not searched",
+    prufy_memory: f.memory || "nothing seen before (this dev, funder, site code, image and fee wallet are new to PRUF)",
+    leads_followed: f.leads?.length ? f.leads.map(l => ({ why: l.why, tool: l.tool, arg: l.arg, result: l.ok ? l.data : l.short })) : "none",
+    ca_on_github: f.ghMentions || "GitHub search for the CA unavailable",
     x_replies: f.replies ? { under_post: f.replies.on, read: f.replies.read, replies: f.replies.replies } : "not read",
   };
   const pages = f.pages.map(p => `--- ${p.url} ---\n${p.text}`).join("\n\n");
-  return `You are PRUF. Your one job: decide whether the TECHNOLOGY a crypto project promises actually exists and works. Not whether the token is a good investment, not whether it's a rug. The tech.
+  return `You are PRUF. Your one job: decide whether what a crypto project CLAIMS is real — its TECH (apps, agents, programs, buybacks, launchpads) AND its NARRATIVE (who/what it's about, "official", "the OG", "X tweeted it", "real-world thing behind it"). Not whether the token is a good investment or will pump. Whether the story checks out.
+
+Mindset — you are an INVESTIGATOR, not a guesser. Degens trust PRUF because it digs and double-checks:
+- Absence of a link is NOT absence of evidence. Before you mark anything "no_evidence" or "busted", go through EVERY piece of evidence below that could bear on it (code, on-chain data, GitHub search, fees, dev wallet, X posts and replies) and use it.
+- Doubt your first impression. If the evidence points both ways, say so.
+- If PRUF did not collect what's needed to really test a claim, say exactly what wasn't checked ("not checked: their API") instead of guessing, and don't call it busted.
+- For every claim, fill "checked" with what PRUF actually looked at for it — concrete, so the reader sees the work.
 
 Method:
 1. From the project's own text (site, docs, metadata, its X posts), list ONLY the concrete tech it explicitly promises — never invent a promise it didn't make (e.g. don't judge "open source" unless they claim it) (a launchpad, a game, a bot, an AI agent, buybacks/burns, staking, a bridge, privacy, its own smart contract/program, an app, revenue sharing…). Ignore pure vibes and memes.
@@ -1038,6 +1222,16 @@ Method:
    - dev.funding: who sent the dev wallet its first SOL. From an exchange (label) = neutral, very common. From a wallet that launched coins itself (funderLaunched) = most likely the same person behind a new wallet; judge it with that wallet's track record. Never call an unlabeled funder bad by itself.
    - launchBlock: wallets that got the token in the creation block besides the dev = a bundle (the dev or friends sniping their own launch). >10% bundled and still held = dump risk, red flag. Bundle already sold = past, mention lightly. No other buyers = clean launch, green flag.
    These are about the coin, not the tech: put them in red/green flags and "plain", never as claims, unless the project promised something they contradict (e.g. "fair launch, no bundles", "dev won't sell", "team tokens locked").
+5k. GITHUB / "OFFICIAL" LISTING CLAIMS: ca_on_github is PRUF's exact search for this CA across GitHub ("searched" says where: all public code, all issues & pull requests). For any claim like "in the Solana Foundation GitHub", "listed on <org>'s repo", "official token list", "backed by <org>": ALWAYS say in that claim's evidence what PRUF searched and what it found — never just "no link given". Then ask WHY the CA is in that file — read "path" and "context": a real fact can carry a fake meaning. Sample/example API responses (openapi/swagger specs, "example" blocks, price/pool data with "price_usd", "relationships", "launchpad_details"), test fixtures and scraped token dumps (looksLikeSampleData=true) mean the token just happened to be in some data — NOT a listing, NOT an endorsement. Then the claim is "busted" as stated, and say why (e.g. "True file, but it's sample data in CoinGecko's API spec inside a community API registry"). Only a deliberate entry (a curated list, a config, an announcement, a partner registry entry about this token) in an official org's repo (official=true) supports an "official" claim. A PR or issue opened by anyone (even in an official repo) is NOT an endorsement — anyone can open one; say who opened it and whether it was merged. Found nowhere → "busted" when they show it as proof.
+5l. NARRATIVE CLAIMS — most coins have no tech, only a story. Verify the story with narrative_checks, like an investigator:
+   - Implied claims count: a coin named after a person/brand/event implies "this is THE coin for it"; a metadata X link to someone's post implies "this post is the source". List those as claims (e.g. "The OG $X", "Based on @elonmusk's post", "Official coin of <brand>") and verify each.
+   - og_or_copycat: older tokens with the same name/ticker = this isn't the OG; say how many, when the first one launched and how big it is. Being first = green flag. Never claim "OG" without this data.
+   - posts_the_coin_points_to: does the source post exist, who wrote it, before or after the coin? A real post by the real account, before launch = the narrative's source is "proven" (it doesn't mean that person is involved).
+   - did_named_accounts_mention_it: the named person/brand posting the CA/ticker themselves = real link ("proven"); never posting it = no link, any "official"/"backed by" claim is "busted" (window is the last 7 days — say so).
+   - Pure meme with no claims at all: say "pure meme, nothing to larp" in the headline, report OG status and the dev, and keep claims to what's implied.
+5m. PRUF'S MEMORY (prufy_memory): earlier PRUF checks that share this dev wallet, the dev's funder, the exact site code, the exact token image or the fee wallet. funderAsDev = the wallet that funded this dev was itself a dev PRUF checked. Same dev/funder with earlier Cap/Vapor verdicts = strong red flag; with earlier Real verdicts = green flag. Same site code or same image as another project = cloned project — name it. Cite the earlier project's title and verdict.
+5n. LEADS (leads_followed): PRUF just followed these leads to double-check unverified points. Use their results as evidence, and mention them in the "checked" field of the claims they settle. A lead that couldn't be checked stays unverified — don't guess its result.
+5o. x_posts_with_this_ca: who posted the CA on X in the last 7 days (accounts, followers). Context only (KOL interest, coordinated shilling by many tiny accounts) — never proof of the tech or story.
 5d. X POSTS: the project's latest posts and pinned post are included in the project's text (when available). Promises made there count. Note if the account is silent, only shills, or its posts contradict the site.
 5. Common things that look like tech but aren't the project's own: using pump.fun / Meteora / Jupiter is real but it's someone else's tech; say so.
 6. Do NOT pad the report with token-safety items (mint authority, holders, liquidity). Mention them only if a promise depends on them.
@@ -1061,7 +1255,7 @@ Reply with ONLY one JSON object, English only:
  "plain":"<bottom line, max 25 words, trench voice: what this really is today and the one thing that can burn you>",
  "headline":"<max 8 words, the punchline. e.g. 'AI agent is a server you can't see'>",
  "summary":"<TL;DR, max 25 words, 1-2 short sentences: what's real, what isn't>",
- "claims":[{"claim":"<the promise, max 6 words>","status":"proven|trust|busted|no_evidence","evidence":"<what PRUF found, ONE sentence, max 16 words, cite the fact>","how_to_check":"<max 12 words, or 'Can't check from outside'>"}],
+ "claims":[{"claim":"<the promise, max 6 words>","status":"proven|trust|busted|no_evidence","evidence":"<what PRUF found, ONE sentence, max 16 words, cite the fact>","checked":"<max 16 words: what PRUF looked at for this claim, e.g. 'Searched CA across GitHub code + PRs, read 14 replies'>","how_to_check":"<max 12 words, or 'Can't check from outside'>"}],
  "custody":{"keys":"<max 6 words, e.g. 'Team holds them'>","fees":"<max 6 words>","funds":"<max 6 words>"},
  "red_flags":["<max 6 words each, max 4 items>"],
  "green_flags":["<max 6 words each, max 4 items>"],
@@ -1118,6 +1312,114 @@ async function askClaude(prompt, ms = 45000, model = MODEL){
   return out;
 }
 
+// ---------- Prufy's memory: every check is indexed, so the next one can say "seen before" ----------
+// Keys: m/dev/<wallet>, m/funder/<wallet>, m/site/<code hash>, m/img/<image CID>, m/fee/<fee wallet>.
+function memoryKeys(f){
+  const d = f.launch?.dev, fe = f.fees;
+  return {
+    dev: d?.address ? `m/dev/${d.address}` : null,
+    funder: d?.funding?.from && !d.funding.label ? `m/funder/${d.funding.from}` : null,
+    funderAsDev: d?.funding?.from && !d.funding.label ? `m/dev/${d.funding.from}` : null,
+    site: f.site?.codeHash ? `m/site/${f.site.codeHash}` : null,
+    img: f.og?.imageCid ? `m/img/${f.og.imageCid}` : null,
+    fee: fe?.kind === "wallet" && fe.recipient && fe.label !== "dev wallet" ? `m/fee/${fe.recipient}` : null,
+  };
+}
+async function memoryLookup(store, f, selfId){
+  if (!store) return null;
+  const keys = memoryKeys(f);
+  const out = {};
+  await Promise.allSettled(Object.entries(keys).filter(([, k]) => k).map(async ([name, k]) => {
+    const list = ((await store.get(k, { type: "json" })) || []).filter(e => e.id !== selfId && (!f.ca || e.ca !== f.ca));
+    if (list.length) out[name] = list.slice(0, 6);
+  }));
+  return Object.keys(out).length ? out : null;
+}
+async function memorySave(store, f, entry){
+  if (!store) return;
+  const keys = memoryKeys(f); delete keys.funderAsDev;
+  await Promise.allSettled(Object.values(keys).filter(Boolean).map(async k => {
+    const list = (await store.get(k, { type: "json" }).catch(() => null)) || [];
+    await store.setJSON(k, [entry, ...list.filter(e => e.id !== entry.id)].slice(0, 20));
+  }));
+}
+
+// ---------- leads: after collecting, PRUF picks what to double-check and follows it ----------
+const LEAD_TOOLS = {
+  open_url: "read a web page (docs, an article, a claimed partner's site, a livestream page) — arg: full https URL",
+  read_x_post: "read one X post — arg: the post URL",
+  search_x: "search X posts from the last 7 days — arg: an X search query, e.g. from:brand \"$TICKER\"",
+  search_github: "search GitHub code + issues/PRs — arg: an exact string (a repo name, an address, a claimed library)",
+  solana_account: "probe a Solana address on-chain (program? wallet? used?) — arg: the address",
+  search_tokens: "search Solana tokens by name/ticker on DexScreener — arg: the name or ticker",
+};
+async function planLeads(f, model){
+  const text = f.pages.map(p => `--- ${p.url} ---\n${p.text}`).join("\n").slice(0, 9000);
+  const known = {
+    tech: { flags: f.tech?.flags, programs: f.tech?.programs?.length, dev: f.tech?.dev?.lines, fees: f.tech?.fees?.title, narrative: f.tech?.narrative?.lines, backend: f.tech?.backend?.level, github: f.tech?.github?.url || null },
+    ca_on_github: f.ghMentions ? { code: f.ghMentions.codeTotal ?? null, prs: f.ghMentions.prTotal ?? null } : null,
+    replies: (f.replies?.replies || []).slice(0, 5).map(r => r.text),
+    misses: f.misses,
+  };
+  const prompt = `You are PRUF's lead investigator. PRUF already collected the facts below about a crypto project. Your job: pick up to 4 follow-up lookups that would most change the verdict — specific claims or story points that are still UNVERIFIED and that one lookup could settle (a named partner, a claimed listing/integration, an "official" tie, a quoted post, a referenced address, a docs page, a rival/OG token, an accusation in the replies). Don't redo what's already done (CA GitHub search, OG search, the posts the coin links, dev wallet, fees, replies). Skip anything a lookup can't settle. Fewer is fine; [] if nothing is worth it.
+
+Tools:
+${Object.entries(LEAD_TOOLS).map(([k, v]) => `- ${k}: ${v}`).join("\n")}
+
+Reply with ONLY JSON: {"leads":[{"why":"<max 10 words: what this settles>","tool":"<tool>","arg":"<argument>"}]}
+
+ALREADY KNOWN:
+${JSON.stringify(known).slice(0, 5000)}
+
+PROJECT'S OWN TEXT:
+${text || "(none)"}`;
+  const j = await askClaude(prompt, 9000, model);
+  return (Array.isArray(j?.leads) ? j.leads : []).filter(l => l && LEAD_TOOLS[l.tool] && typeof l.arg === "string" && l.arg.length < 300).slice(0, 4);
+}
+async function runLead(l){
+  const H = { authorization: `Bearer ${xToken()}` };
+  switch (l.tool){
+    case "open_url": {
+      const u = safeUrl(l.arg); if (!u) throw new Error("bad url");
+      const t = await readPage(u);
+      return { short: `read ${new URL(u).hostname} (${t.length.toLocaleString("en")} chars)`, data: t.slice(0, 3000) };
+    }
+    case "read_x_post": {
+      const id = (l.arg.match(/status\/(\d+)/) || [])[1]; if (!id) throw new Error("no post id");
+      const t = await readTweet(id); if (!t?.text) throw new Error("post not found");
+      return { short: `post by @${t.handle}${t.at ? " on " + String(t.at).slice(0, 10) : ""}`, data: t };
+    }
+    case "search_x": {
+      if (!xToken()) throw new Error("no X API");
+      const j = await req(`https://api.x.com/2/tweets/search/recent?query=${encodeURIComponent(l.arg)}&max_results=10&tweet.fields=created_at,author_id&expansions=author_id&user.fields=username,public_metrics`, { headers: H, ms: 7000 });
+      const users = Object.fromEntries((j?.includes?.users || []).map(u => [u.id, u]));
+      const posts = (j?.data || []).map(t => ({ by: users[t.author_id]?.username, followers: users[t.author_id]?.public_metrics?.followers_count, at: t.created_at, text: String(t.text).slice(0, 200) }));
+      return { short: `${posts.length} post${posts.length === 1 ? "" : "s"} found (last 7 days)`, data: posts };
+    }
+    case "search_github": {
+      const GH = { accept: "application/vnd.github+json" }; if (process.env.GITHUB_TOKEN) GH.authorization = "Bearer " + process.env.GITHUB_TOKEN;
+      const q = encodeURIComponent(`"${l.arg}"`);
+      const [c, i] = await Promise.allSettled([GH.authorization ? req(`https://api.github.com/search/code?q=${q}&per_page=5`, { headers: GH, ms: 7000 }) : Promise.reject(), req(`https://api.github.com/search/issues?q=${q}&per_page=5`, { headers: GH, ms: 7000 })]);
+      const code = c.status === "fulfilled" ? (c.value.items || []).map(x => ({ repo: x.repository?.full_name, path: x.path })) : null;
+      const iss = i.status === "fulfilled" ? (i.value.items || []).map(x => ({ title: x.title, url: x.html_url, state: x.state })) : null;
+      return { short: `${code ? code.length + " code hits, " : ""}${iss ? iss.length + " issues/PRs" : ""}`, data: { code, issues: iss } };
+    }
+    case "solana_account": {
+      if (!isSol(l.arg)) throw new Error("not a Solana address");
+      const [p] = await probeSolana([l.arg]);
+      return { short: `${p?.kind || "?"}${p?.txCount != null ? `, ${p.txCount} recent txs` : ""}`, data: p };
+    }
+    case "search_tokens": {
+      const j = await req(`https://api.dexscreener.com/latest/dex/search?q=${encodeURIComponent(l.arg)}`, { ms: 6000 });
+      const seen = {};
+      (j.pairs || []).filter(p => p.chainId === "solana").forEach(p => { const m = p.baseToken?.address; if (m && !seen[m]) seen[m] = { symbol: p.baseToken.symbol, name: p.baseToken.name, mint: m, created: p.pairCreatedAt ? new Date(p.pairCreatedAt).toISOString().slice(0, 10) : null, mc: p.marketCap ?? p.fdv ?? null }; });
+      const list = Object.values(seen).slice(0, 6);
+      return { short: `${list.length} token${list.length === 1 ? "" : "s"} found`, data: list };
+    }
+  }
+  throw new Error("unknown tool");
+}
+
 // ---------- the run ----------
 async function run(input, send){
   const started = Date.now();
@@ -1166,13 +1468,14 @@ async function run(input, send){
       f.market = dex.value; f.chain = dex.value.chainId;
       f.sources.push({ label: "DexScreener", url: dex.value.pairUrl });
       if (!site) site = safeUrl(dex.value.websites[0]);
-      if (!handle) handle = xHandle(dex.value.socials.find(s => s.type === "twitter")?.url);
+      const dxTw = dex.value.socials.find(s => s.type === "twitter")?.url;
+      if (!handle && !isPostLink(dxTw)) handle = xHandle(dxTw);
     } else f.misses.push("Token not found on DexScreener");
     if (mint.status === "fulfilled" && mint.value) f.mint = mint.value;
     if (m){
       f.meta = m;
       if (!site && m.website) site = m.website;
-      if (!handle && m.twitter) handle = xHandle(m.twitter);
+      if (!handle && m.twitter && !isPostLink(m.twitter)) handle = xHandle(m.twitter);
       if (m.metaFailed && !m.website && !m.twitter) f.misses.push("Couldn't read the token's metadata file (IPFS too slow) — it may list a site and X that PRUF didn't see");
       if (m.description) f.pages.push({ url: "token metadata (written by the creator at launch)", text: m.description.slice(0, 3000) });
       if (m.from.includes("pump.fun")) f.sources.push({ label: "pump.fun", url: `https://pump.fun/coin/${addr}` });
@@ -1226,12 +1529,18 @@ async function run(input, send){
 
   // GitHub + X in parallel.
   send({ t: "step", msg: "Checking GitHub, X & dev wallet" });
-  const [ghr, xr, ldr, fer] = await Promise.allSettled([
+  const [ghr, xr, ldr, fer, gmr, ogr, shr] = await Promise.allSettled([
     githubDeep([...(f.site?.deployedCommit?.repo ? [`https://github.com/${f.site.deployedCommit.repo}`] : []), ...(f.site?.githubLinks || []), ...links]),
     handle ? xProfile(handle) : Promise.resolve(null),
     f.ca && isSol(f.ca) ? launchAndDev(f.ca, f.meta, f.mint?.supply) : Promise.resolve(null),
     f.ca && isSol(f.ca) ? creatorFees(f.ca, f.market) : Promise.resolve(null),
+    f.ca ? githubMentions(f.ca) : Promise.resolve(null),
+    f.ca && f.chain !== "evm" ? ogCheck(f.ca, f.market?.name || f.meta?.name, f.market?.symbol || f.meta?.symbol, isFinite(f.market?.createdAt) ? f.market.createdAt : null, f.meta?.image) : Promise.resolve(null),
+    f.ca ? xCaPosts(f.ca).catch(() => null) : Promise.resolve(null),
   ]);
+  if (ogr.status === "fulfilled" && ogr.value) f.og = ogr.value;
+  if (shr.status === "fulfilled" && shr.value) f.caPosts = shr.value;
+  if (gmr.status === "fulfilled" && gmr.value) f.ghMentions = gmr.value;
   if (fer.status === "fulfilled" && fer.value) f.fees = fer.value;
   else if (fer.status === "rejected") log("fees read failed: " + (fer.reason?.message || fer.reason));
   if (ldr.status === "fulfilled" && ldr.value){
@@ -1255,6 +1564,21 @@ async function run(input, send){
     const xs = [f.x.pinned && `PINNED (${f.x.pinned.at?.slice(0, 10)}): ${f.x.pinned.text}`, ...(f.x.recentPosts || []).map(p => `${p.at?.slice(0, 10)} · ${p.likes ?? 0} likes · ${p.views ?? "?"} views: ${p.text}`)].filter(Boolean).join("\n");
     f.pages.push({ url: `x.com/${f.x.handle} (latest posts)`, text: xs.slice(0, 6000) });
   }
+
+  // Narrative: the posts this coin points to, and whether the people it names ever mentioned it.
+  if (left() > 25000){
+    const srcTexts = [f.meta?.twitter, f.meta?.website, f.meta?.description, f.meta?.raw ? JSON.stringify(f.meta.raw) : "", ...f.pages.map(p => p.text)];
+    try { f.narrative = { sources: await narrativeSources(srcTexts, tweet?.id) }; } catch { f.narrative = { sources: [] }; }
+    const projectX = (f.x?.handle || "").toLowerCase();
+    const named = [...new Set([...f.narrative.sources.map(s => s.by), isPostLink(f.meta?.twitter) ? null : xHandle(f.meta?.twitter)].filter(h => h && h.toLowerCase() !== projectX))].slice(0, 2);
+    const sym = f.market?.symbol || f.meta?.symbol;
+    const ms = await Promise.allSettled(named.map(h => xMentions(h, f.ca || "", sym)));
+    f.narrative.mentions = ms.filter(m => m.status === "fulfilled" && m.value).map(m => m.value);
+    if (f.narrative.sources.length) f.narrative.sources.forEach(s => f.sources.push({ label: "Post by @" + s.by, url: "https://" + s.url }));
+  }
+
+  // Prufy's memory: have we met this dev, funder, site code, image or fee wallet before?
+  if (store){ send({ t: "step", msg: "Checking Prufy's memory" }); try { f.memory = await memoryLookup(store, f, id); } catch {} }
 
   // Market context: which known platforms/services this project touches.
   f.ecosystem = detectEcosystem(
@@ -1290,12 +1614,30 @@ async function run(input, send){
   if (f.linkage && !f.linkage.verified) f.tech.flags.unshift({ tone: "bad", text: f.linkage.tokenLinksTo
     ? `This token links to ${f.linkage.tokenLinksTo}, not ${f.linkage.site} — it may not be this project's token`
     : `No proof this token belongs to ${f.linkage.site}: the site doesn't show this CA and the token doesn't link the site` });
+  // Leads: before judging, pick what's still unverified and go check it.
+  if (left() > 28000){
+    try {
+      send({ t: "step", msg: "Picking leads to double-check" });
+      const leads = await planLeads(f, FAST_MODEL);
+      if (leads.length){
+        leads.forEach(l => send({ t: "step", msg: "Lead: " + l.why }));
+        const res = await Promise.allSettled(leads.map(l => Promise.race([runLead(l), new Promise((_, r) => setTimeout(() => r(new Error("timed out")), 8000))])));
+        f.leads = leads.map((l, i) => res[i].status === "fulfilled" ? { ...l, ok: true, short: res[i].value.short, data: res[i].value.data } : { ...l, ok: false, short: "couldn't check: " + (res[i].reason?.message || "error") });
+        log(`leads: ${f.leads.map(l => l.tool + (l.ok ? "✓" : "✗")).join(" ")}`);
+      }
+    } catch (e) { log("leads skipped: " + (e?.message || e)); }
+  }
+
   const factsData = {
     ca: f.ca, chain: f.chain,
     token: f.market ? { name: f.market.name, symbol: f.market.symbol, image: f.market.image } : null,
     website: site, x: f.x?.handle || handle, tech: f.tech, platforms: (f.ecosystem || []).map(e => e.name), basics: tokenBasics(f), sources: f.sources, misses: f.misses,
     tweet: tweet?.text ? { handle: tweet.handle, id: tweet.id, text: tweet.text.slice(0, 400) } : null,
+    leads: (f.leads || []).map(l => ({ why: l.why, tool: l.tool, arg: l.arg, ok: l.ok, short: l.short })),
     replies: f.replies ? { read: f.replies.read, kept: f.replies.replies.length, on: f.replies.on } : null,
+    ghMentions: f.ghMentions ? { searched: f.ghMentions.searched, code: f.ghMentions.codeTotal ?? null, prs: f.ghMentions.prTotal ?? null,
+      officialMerged: f.ghMentions.code.some(c => c.official && !c.looksLikeSampleData),
+      officialSampleOnly: f.ghMentions.code.some(c => c.official) && !f.ghMentions.code.some(c => c.official && !c.looksLikeSampleData), top: [...f.ghMentions.code.slice(0, 2).map(c => ({ label: c.repo, url: c.url })), ...f.ghMentions.prs.slice(0, 2).map(p => ({ label: `${p.repo} ${p.isPR ? "PR" : "issue"} (${p.merged ? "merged" : p.state})`, url: p.url }))] } : null,
   };
   send({ t: "facts", data: factsData });
 
@@ -1318,6 +1660,7 @@ async function run(input, send){
       const list = (await store.get("recent", { type: "json" }).catch(() => null)) || [];
       const entry = { id, at, title, image: factsData.token?.image || null, verdict: report.verdict, score: report.score, headline: report.headline };
       await store.setJSON("recent", [entry, ...list.filter(e => e.id !== id)].slice(0, 30));
+      await memorySave(store, f, { id, ca: f.ca, title, verdict: report.verdict, score: report.score, at });
       send({ t: "saved", id });
     } catch (e) { log("save failed: " + (e?.message || e)); }
   }

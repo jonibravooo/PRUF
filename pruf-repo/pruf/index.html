@@ -5,14 +5,14 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>PRUF</title>
 <meta name="theme-color" content="#0b0c0c">
-<meta name="description" content="Is the tech real? Drop a contract address and PRUF shows what's verifiable on-chain, what needs trust, and where the story falls apart.">
+<meta name="description" content="Is it real, or just a story? Drop a CA and PRUF checks the tech, the narrative and the dev: what's verifiable on-chain, what needs trust, and where the story falls apart.">
 <meta property="og:title" content="PRUF">
-<meta property="og:description" content="Is the tech real? Drop a CA and find out what's verifiable and what's trust.">
+<meta property="og:description" content="Is it real, or just a story? Drop a CA: tech, narrative and dev, checked.">
 <meta property="og:image" content="https://pruf.fun/assets/og-image.png">
 <meta property="og:url" content="https://pruf.fun">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="PRUF — Don't trust. PRUF it.">
-<meta name="twitter:description" content="Is the tech real? Paste a CA and see.">
+<meta name="twitter:description" content="Is it real, or just a story? Paste a CA and see.">
 <meta name="twitter:image" content="https://pruf.fun/assets/og-image.png">
 <link rel="icon" type="image/png" href="/assets/favicon.png">
 <link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
@@ -147,6 +147,8 @@ hr{border:0;border-top:1px solid var(--line);margin:0}
 .tldr b{flex:none;font-family:var(--f-mono);font-size:.72rem;color:var(--accent);letter-spacing:.06em}
 .tldr p{margin:0;font-size:.95rem;color:var(--ink)}
 .claim-ev{margin:0;font-size:.88rem;color:var(--muted)}
+.claim-chk{margin:2px 0 0;display:flex;gap:6px;align-items:flex-start;font-size:.78rem;color:var(--faint)}
+.claim-chk .ic{color:var(--accent);margin-top:2px}
 details.how{font-size:.8rem;color:var(--faint)}
 details.how summary{cursor:pointer;list-style:none;display:inline-flex;gap:6px;align-items:center}
 details.how summary::-webkit-details-marker{display:none}
@@ -297,6 +299,18 @@ button.primary:active{transform:translateY(0) scale(.98)}
 .badge{font-family:var(--f-title);font-weight:700;font-size:.74rem;color:var(--accent);background:var(--accent-soft);border-color:transparent;padding:3px 11px 2px}
 .tweet{border-radius:0 14px 14px 0}
 
+/* Leads Prufy followed */
+.leads-wrap{display:flex;flex-direction:column;gap:8px}
+.leads-h{margin:0;font-family:var(--f-title);font-weight:700;font-size:.95rem}
+.leads{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
+.leads li{display:flex;gap:10px;align-items:flex-start;background:var(--field);border-radius:14px;padding:10px 12px}
+.leads li .ic{color:var(--accent);margin-top:3px}
+.leads li.no .ic{color:var(--faint)}
+.leads li div{display:flex;flex-direction:column;gap:2px;min-width:0}
+.leads li b{font-size:.88rem;font-weight:600}
+.leads li span{font-size:.8rem;color:var(--muted)}
+.leads li code{font-family:var(--f-mono);font-size:.72rem;color:var(--faint);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
 /* X link + official CA */
 .nav-r{display:flex;align-items:center;gap:10px}
 .xlink{display:inline-flex;align-items:center;gap:7px;color:var(--ink);text-decoration:none;font-family:var(--f-title);font-weight:700;font-size:.88rem;background:var(--field);border-radius:999px;padding:6px 12px 5px;transition:color .15s,background .15s}
@@ -339,6 +353,7 @@ button.primary:active{transform:translateY(0) scale(.98)}
     <symbol id="i-list" viewBox="0 0 24 24"><path d="M10 7h10M10 12h10M10 17h10"/><path d="M4 7l1.3 1.3L7.5 6M4 12l1.3 1.3L7.5 11M4 17l1.3 1.3L7.5 16"/></symbol>
     <symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6"/><path d="M15 15l5 5"/></symbol>
     <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 7.5V12l3 2"/></symbol>
+    <symbol id="i-story" viewBox="0 0 24 24"><path d="M12 6.5c-1.8-1.3-4.3-2-7.5-2v13c3.2 0 5.7.7 7.5 2 1.8-1.3 4.3-2 7.5-2v-13c-3.2 0-5.7.7-7.5 2z"/><path d="M12 6.5v13"/></symbol>
     <symbol id="i-token" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M9 9.5h6M12 9.5v6"/></symbol>
   </defs>
 </svg>
@@ -383,8 +398,8 @@ button.primary:active{transform:translateY(0) scale(.98)}
   </nav>
 
   <section class="hero">
-    <h1>Is the tech <em>real</em>, or just a story?</h1>
-    <p>Drop a CA, a site or an X post. Prufy reads the code, probes it on-chain and tells you what's real and what's cap.</p>
+    <h1>Is it <em>real</em>, or just a story?</h1>
+    <p>Drop a CA, a site or an X post. Prufy digs into the tech, the narrative and the dev, and tells you what's real and what's cap.</p>
   </section>
 
   <div class="ca-bar" id="ca-bar" data-ca="__CA__" hidden>
@@ -462,7 +477,7 @@ function renderEmpty(){
   const box = $("report"); box.replaceChildren();
   box.append(el("div",{class:"empty-hero"}, el("img",{src:"/assets/prufy-base.webp",alt:"Prufy, the PRUF mascot",width:104,height:104}),
     el("div",{class:"sec"}, el("p",{class:"empty-title",text:"Prufy is waiting for a CA"}),
-    el("p",{class:"empty-sub",text:"Prufy reads the site and its JS, probes every program and wallet on-chain, checks the dev and the GitHub. Every promise gets a stamp:"}))));
+    el("p",{class:"empty-sub",text:"Prufy reads the site and its JS, probes programs and wallets on-chain, tracks the dev, checks if it's the OG and if the story's sources are real. Every claim gets a stamp:"}))));
   const g = el("div",{class:"empty-grid"});
   [["proven","Found it on-chain or in the code. It's live."],["trust","Runs on their servers. Can't verify it, you're trusting the dev."],["busted","The evidence says otherwise."],["no_evidence","Promised. Nothing behind it."]]
     .forEach(([k,d]) => g.append(el("div",{class:"legend"}, pill(k), el("p",{text:d}))));
@@ -483,7 +498,7 @@ const EXAMPLE = {
   report: { verdict:"busted", score:25, headline:"AI agent exists on paper, never used",
     summary:"Program is deployed but has 0 txs. Live volume is random numbers. Treasury address doesn't exist.",
     claims:[
-      { claim:"AI agent trades 24/7", status:"busted", evidence:"Their program: deployed 3 days ago, 0 txs since.", how_to_check:"Solscan → program → Transactions" },
+      { claim:"AI agent trades 24/7", status:"busted", evidence:"Their program: deployed 3 days ago, 0 txs since.", checked:"Probed the program on-chain, read its last 200 txs", how_to_check:"Solscan → program → Transactions" },
       { claim:"Live trading volume", status:"busted", evidence:"Site adds a random number to the counter every second.", how_to_check:"Refresh twice, numbers won't match" },
       { claim:"Buybacks from agent profits", status:"no_evidence", evidence:"No buyback wallet anywhere. Treasury in docs doesn't exist.", how_to_check:"Can't check from outside" },
       { claim:"Trade history in the app", status:"trust", evidence:"Pulled from their private database, not from chain.", how_to_check:"Can't check from outside" },
@@ -496,7 +511,7 @@ const EXAMPLE = {
 function explorerLinks(ca, chain){
   if (!ca) return [];
   const c = encodeURIComponent(ca);
-  if (chain === "solana") return [["Solscan",`https://solscan.io/token/${c}`],["DexScreener",`https://dexscreener.com/solana/${c}`],["RugCheck",`https://rugcheck.xyz/tokens/${c}`],["Bubblemaps",`https://app.bubblemaps.io/sol/token/${c}`]];
+  if (chain === "solana") return [["Solscan",`https://solscan.io/token/${c}`],["DexScreener",`https://dexscreener.com/solana/${c}`],["RugCheck",`https://rugcheck.xyz/tokens/${c}`],["Bubblemaps",`https://app.bubblemaps.io/sol/token/${c}`],["GitHub search",`https://github.com/search?q=%22${c}%22&type=code`]];
   const scan = { ethereum:"https://etherscan.io/token/", base:"https://basescan.org/token/", bsc:"https://bscscan.com/token/", arbitrum:"https://arbiscan.io/token/" }[chain];
   const out = [];
   if (scan) out.push(["Explorer", scan + c]);
@@ -569,12 +584,31 @@ function renderFacts(f){
   // One grid for all cards (programs, wallets, dev, fees), so they sit side by side.
   const grids = [...sec.querySelectorAll(":scope > .progs")];
   grids.slice(1).forEach(x => { grids[0].append(...x.children); x.remove(); });
-  if (!t.programs?.length && !t.wallets?.length && !t.dev && !t.fees && !t.block) sec.append(el("p",{class:"none-found",text:"No program or wallet of their own found in the site code, docs or GitHub."}));
+  // Narrative and memory go first: they're what a degen wants to see before the plumbing.
+  [[t.memory, "clock"], [t.narrative, "story"]].forEach(([c, icon]) => {
+    if (!c) return;
+    const card = el("div",{class:"prog "+(c.tone||"info")}, el("span",{class:"tag"}, ico(icon), c.title));
+    c.lines.forEach(l => card.append(el("span",{text:l})));
+    let g = sec.querySelector(":scope > .progs");
+    if (!g){ g = el("div",{class:"progs"}); const al = sec.querySelector(":scope > .alerts"); al ? al.after(g) : sec.prepend(g); }
+    g.prepend(card);
+  });
+  if (f.leads?.length){
+    const ul = el("ul",{class:"leads"});
+    f.leads.forEach(l => ul.append(el("li",{class:l.ok ? "ok" : "no"}, ico("search"), el("div",{}, el("b",{text:l.why}), el("span",{text:(l.short || "") + " · " + l.tool.replace(/_/g," ")}), el("code",{text:l.arg})))));
+    sec.append(el("div",{class:"leads-wrap"}, el("p",{class:"leads-h",text:"Leads Prufy followed"}), ul));
+  }
+  if (!t.programs?.length && !t.wallets?.length && !t.dev && !t.fees && !t.block && !t.narrative && !t.memory) sec.append(el("p",{class:"none-found",text:"No program or wallet of their own found in the site code, docs or GitHub."}));
 
   const chips = el("div",{class:"chips"});
   (f.platforms || []).filter(n => !(t.launch && t.launch.via.toLowerCase().includes(n.split(" ")[0].toLowerCase()))).forEach(n => chips.append(el("span",{class:"chip"}, ico("apps"), n)));
+  if (f.ghMentions){
+    const g = f.ghMentions, n = (g.code || 0) + (g.prs || 0);
+    chips.append(el("span",{class:"chip" + (g.officialMerged ? " ok" : n ? "" : " dim")}, ico("search"),
+      n ? `CA on GitHub: ${g.code ?? "?"} file${g.code === 1 ? "" : "s"} · ${g.prs ?? "?"} PR/issue${g.prs === 1 ? "" : "s"}` + (g.officialMerged ? " · in an official Solana repo" : g.officialSampleOnly ? " · official repo, but only as sample data" : "") : "CA searched on GitHub: not found"));
+  }
   if (f.replies) chips.append(el("span",{class:"chip"}, ico("chat"), `Read ${f.replies.read} repl${f.replies.read === 1 ? "y" : "ies"} on X`));
-  if (t.launch) chips.append(el("span",{class:"chip"}, ico("rocket"), "Launched via " + (t.launch.via.length > 20 ? t.launch.via.slice(0,4) + "…" + t.launch.via.slice(-4) : t.launch.via) + (t.launch.created ? " · " + Math.max(1, Math.round((Date.now() - Date.parse(t.launch.created)) / 864e5)) + "d ago" : "")));
+  if (t.launch) chips.append(el("span",{class:"chip"}, ico("rocket"), "Launched via " + (t.launch.via.length > 20 ? t.launch.via.slice(0,4) + "…" + t.launch.via.slice(-4) : t.launch.via) + (t.launch.model ? " · " + t.launch.model : "") + (t.launch.created ? " · " + Math.max(1, Math.round((Date.now() - Date.parse(t.launch.created)) / 864e5)) + "d ago" : "")));
   if (t.backend){
     const B = { open_and_deployed:["chip ok","Open-source server · live commit " + (t.backend.commit||"").slice(0,7) + " matches the repo"], open_source_unproven:["chip","Server code is public, live version unproven"], closed:["chip dim","Server code not public"] }[t.backend.level];
     if (B) chips.append(el("span",{class:B[0],text:B[1]}));
@@ -630,6 +664,7 @@ function renderReport(r){
       const s = STATUS[c.status] ? c.status : "no_evidence";
       const body = el("div",{class:"claim-body"}, el("strong",{text:c.claim||""}));
       if (c.evidence) body.append(el("p",{class:"claim-ev",text:c.evidence}));
+      if (c.checked) body.append(el("p",{class:"claim-chk"}, ico("search"), el("span",{text:"Prufy checked: " + c.checked})));
       if (c.how_to_check) body.append(el("details",{class:"how"}, el("summary",{text:"How to verify"}), el("p",{text:c.how_to_check})));
       list.append(el("div",{class:"claim"}, pill(s), body));
     }
@@ -665,7 +700,7 @@ function renderReport(r){
     };
     tail.push(el("div",{class:"sec"}, el("h3",{}, bub("mega","acc"), "Share the verdict"), el("div",{class:"post"}, p, el("div",{class:"post-foot"}, el("span",{text:r.post.length+" / 280"}), el("div",{class:"share-row"}, copyBtn, el("div",{id:"share-actions",class:"share-row"}, ...(shareId ? shareButtons() : [])))))));
   }
-  tail.push(el("p",{class:"note",text:"Automated, can be wrong — read the evidence, DYOR. 'Real' = the tech exists, not that it's safe or will pump. 'Trust me bro' = can't be checked, not fake. NFA."}));
+  tail.push(el("p",{class:"note",text:"Automated, can be wrong — read the evidence, DYOR. 'Real' = it checks out (tech or story), not that it's safe or will pump. 'Trust me bro' = can't be checked, not fake. NFA."}));
   box.append(...tail);
 }
 

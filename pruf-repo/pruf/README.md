@@ -36,6 +36,8 @@ Deploy to Netlify and set these environment variables:
 | `GITHUB_TOKEN` | recommended | Higher GitHub API limits |
 | `X_BEARER_TOKEN` | optional | Reads a project's latest X posts |
 | `X_MAX_REPLIES` | optional | Replies read under the checked post (default 15, `0` = off) |
+| `X_MAX_SHILLS` | optional | X posts read when searching who posted the CA (default 10, `0` = off) |
+| `PRUF_CA` | optional | The official $PRUF contract address shown on the site (set after launch, then redeploy) |
 | `JINA_API_KEY` | optional | Faster website reading |
 
 No keys live in this repo.
