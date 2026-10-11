@@ -226,6 +226,17 @@ details.basics[open] summary{margin-bottom:12px}
 .plain p{margin:0;font-size:1rem}
 .plain.crowd b{color:var(--muted)} .plain.crowd p{font-size:.92rem}
 .share-row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.fb{display:flex;flex-direction:column;gap:10px}
+.fb-q{margin:0;font-size:.88rem;color:var(--muted)}
+.fb-btn{padding:8px 14px;font-size:.88rem}
+.fb-btn.on{outline:2px solid var(--accent);outline-offset:1px}
+.fb-more{display:flex;flex-direction:column;gap:8px}
+.fb-more[hidden]{display:none}
+.fb-note{width:100%;box-sizing:border-box;background:var(--field);color:var(--ink);border:1px solid var(--line);border-radius:10px;padding:10px 12px;font:inherit;font-size:.9rem;resize:vertical}
+.fb-note:focus{outline:2px solid var(--accent);outline-offset:0}
+.fb-send{padding:8px 14px;font-size:.88rem}
+.fb-msg{font-size:.8rem;color:var(--warn)}
+.fb-done{margin:0;color:var(--ok);font-size:.9rem}
 .cached-note{margin:0;font-size:.8rem;color:var(--faint);display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .cached-note button{padding:4px 10px;font-size:.78rem}
 .tweet{margin:0;border-left:3px solid var(--accent);background:var(--field);border-radius:0 10px 10px 0;padding:10px 14px}
@@ -853,8 +864,40 @@ function renderReport(r){
     };
     tail.push(el("div",{class:"sec"}, el("h3",{}, bub("mega","acc"), "Share the verdict"), el("div",{class:"post"}, p, el("div",{class:"post-foot"}, el("span",{text:r.post.length+" / 280"}), el("div",{class:"share-row"}, copyBtn, el("div",{id:"share-actions",class:"share-row"}, ...(shareId ? shareButtons() : [])))))));
   }
+  tail.push(feedbackBox());
   tail.push(el("p",{class:"note",text:"Automated, can be wrong — read the evidence, DYOR. 'Real' = it checks out (tech or story), not that it's safe or will pump. 'Trust me bro' = can't be checked, not fake. NFA."}));
   box.append(...tail);
+}
+
+// "Did Prufy get it right?" — the beta's battle-test loop. Goes to /api/feedback with the saved check's id.
+function feedbackBox(){
+  const thanks = t => wrap.replaceChildren(el("p",{class:"fb-done",text:t}));
+  let vote = null;
+  const send = async () => {
+    if (!shareId){ msg.textContent = "Saving the check… try again in a sec."; return; }
+    sendBtn.disabled = true;
+    try {
+      const r = await fetch("/api/feedback", { method:"POST", headers:{ "content-type":"application/json" }, body: JSON.stringify({ id: shareId, vote, note: note.value }) });
+      if (!r.ok) throw 0;
+      try { localStorage.setItem("pruf-fb-" + shareId, vote); } catch {}
+      thanks(vote === "up" ? "Thanks — noted. Prufy gets sharper with every vote." : "Thanks — this is exactly what tunes Prufy for the trenches.");
+    } catch { msg.textContent = "Couldn't send it. Try again."; sendBtn.disabled = false; }
+  };
+  const pick = v => () => {
+    vote = v; up.classList.toggle("on", v === "up"); down.classList.toggle("on", v === "down");
+    note.placeholder = v === "up" ? "Anything to add? (optional)" : "What did Prufy miss or get wrong? (optional)";
+    more.hidden = false; note.focus({ preventScroll:true });
+  };
+  const up = el("button",{type:"button",class:"fb-btn",text:"👍 Nailed it"}); up.onclick = pick("up");
+  const down = el("button",{type:"button",class:"fb-btn",text:"👎 Missed something"}); down.onclick = pick("down");
+  const note = el("textarea",{class:"fb-note",rows:3,maxlength:600});
+  const sendBtn = el("button",{type:"button",class:"fb-send",text:"Send feedback"}); sendBtn.onclick = send;
+  const msg = el("span",{class:"fb-msg"});
+  const more = el("div",{class:"fb-more"}, note, el("div",{class:"share-row"}, sendBtn, msg)); more.hidden = true;
+  const wrap = el("div",{class:"fb"}, el("p",{class:"fb-q",text:"Beta battle test: tell Prufy if this verdict is right. Your feedback decides what gets built next."}), el("div",{class:"share-row"}, up, down), more);
+  const sec = el("div",{class:"sec"}, el("h3",{}, bub("eyes","acc"), "Did Prufy get it right?"), wrap);
+  setTimeout(() => { try { if (shareId && localStorage.getItem("pruf-fb-" + shareId)) thanks("You already rated this check — thanks."); } catch {} }, 2500);
+  return sec;
 }
 
 function status(msg, isErr, spinning){
@@ -864,6 +907,8 @@ function status(msg, isErr, spinning){
 }
 
 let savedCode = ""; try { savedCode = localStorage.getItem("pruf-code") || ""; } catch {}
+// pruf.fun/?code=XYZ once → remembered on this device (owner code skips the hourly limit)
+try { const c = new URLSearchParams(location.search).get("code"); if (c){ savedCode = c; localStorage.setItem("pruf-code", c); history.replaceState(null, "", location.pathname); } } catch {}
 
 $("form").addEventListener("submit", e => {
   e.preventDefault();

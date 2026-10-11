@@ -9,6 +9,25 @@ import { createHash } from "node:crypto";
 // Saved reports: share links, "recently checked", and a 6h cache so the same check isn't paid twice.
 function reportStore(){ try { return getStore("reports"); } catch { return null; } }
 const reportId = key => createHash("sha1").update(String(key).toLowerCase()).digest("hex").slice(0, 10);
+// Same store, but reads always see the latest write — needed for "is someone already checking this?" locks.
+function liveStore(){ try { return getStore({ name: "reports", consistency: "strong" }); } catch { return reportStore(); } }
+const sleep = ms => new Promise(ok => setTimeout(ok, ms));
+
+// Fresh checks per IP per hour (saved checks don't count). PRUF_RATE_LIMIT in Netlify changes it; 0 = off.
+// The IP is never stored, only a salted hash of it.
+async function rateCheck(store, ip){
+  const limit = Number(process.env.PRUF_RATE_LIMIT ?? 6);
+  if (!store || !ip || !(limit > 0)) return null;
+  const key = "rl/" + createHash("sha256").update(ip + "|" + (process.env.PRUF_SALT || "prufy")).digest("hex").slice(0, 20);
+  const now = Date.now();
+  const recent = ((await store.get(key, { type: "json" }).catch(() => null)) || []).filter(t => now - t < 3600e3);
+  if (recent.length >= limit){
+    const mins = Math.max(1, Math.ceil((recent[0] + 3600e3 - now) / 60000));
+    return `That's ${limit} fresh checks from you this hour. Saved checks still open instantly — new ones again in ${mins} min.`;
+  }
+  await store.setJSON(key, [...recent, now]).catch(() => {});
+  return null;
+}
 
 const SOL_RPC = process.env.SOLANA_RPC_URL || "https://api.mainnet-beta.solana.com";
 const MODEL = process.env.ANTHROPIC_MODEL || "claude-sonnet-5-5";
@@ -1334,14 +1353,28 @@ function claudeKey(){
   return String(process.env.ANTHROPIC_API_KEY || "").replace(/[\u200B-\u200D\uFEFF]/g, "").trim().replace(/^["']+|["']+$/g, "").trim();
 }
 
-async function askClaude(prompt, ms = 45000, model = MODEL, maxTokens = 2500){
-  const r = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST", signal: AbortSignal.timeout(ms),
-    headers: { "content-type": "application/json", "x-api-key": claudeKey(), "anthropic-version": "2023-06-01" },
-    body: JSON.stringify({ model, max_tokens: maxTokens, messages: [{ role: "user", content: prompt }] }),
-  });
-  const j = await r.json().catch(() => ({}));
+// Busy (429 rate limit / 529 overloaded)? Don't fail: switch to the other model (separate limits) and wait in line
+// while there's still time to answer. onWait(msg) tells the user why it's slower.
+const BUSY = "Prufy is slammed right now — too many checks at once. Try again in a minute.";
+async function askClaude(prompt, ms = 45000, model = MODEL, maxTokens = 2500, onWait = null){
+  const end = Date.now() + ms;
+  let r, j, tries = 0, swapped = false;
+  for (;;){
+    r = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST", signal: AbortSignal.timeout(Math.max(1000, end - Date.now())),
+      headers: { "content-type": "application/json", "x-api-key": claudeKey(), "anthropic-version": "2023-06-01" },
+      body: JSON.stringify({ model, max_tokens: maxTokens, messages: [{ role: "user", content: prompt }] }),
+    });
+    j = await r.json().catch(() => ({}));
+    if (r.ok || ![429, 503, 529].includes(r.status) || !onWait) break;
+    if (!swapped && model !== FAST_MODEL){ swapped = true; model = FAST_MODEL; onWait("Lots of checks right now — switching to the fast lane"); continue; }
+    const wait = Math.min(Math.max(2000, Number(r.headers.get("retry-after")) * 1000 || 2500 + Math.random() * 3000), 8000);
+    if (end - Date.now() - wait < 15000) throw new Error(BUSY);
+    if (!tries++) onWait("Prufy is busy — you're in line");
+    await new Promise(ok => setTimeout(ok, wait));
+  }
   if (!r.ok){
+    if ([429, 503, 529].includes(r.status)) throw new Error(BUSY);
     const k = claudeKey();
     const hint = r.status === 401 ? ` (server sees a key starting "${k.slice(0, 10)}…", ${k.length} characters)` : "";
     throw new Error("Claude API: " + (j.error?.message || r.status) + hint);
@@ -1464,7 +1497,7 @@ async function runLead(l){
 }
 
 // ---------- the run ----------
-async function run(input, send){
+async function run(input, send, ctx = {}){
   const started = Date.now();
   const left = () => 52000 - (Date.now() - started); // Netlify stops functions at 60s
   const log = m => console.log(`[pruf] ${((Date.now() - started) / 1000).toFixed(1)}s ${m}`);
@@ -1485,6 +1518,33 @@ async function run(input, send){
       const c = await store.get(`r/${id}`, { type: "json" });
       if (c && Date.now() - c.at < 6 * 3600e3){ send({ t: "facts", data: c.facts }); send({ t: "report", data: c.report }); send({ t: "saved", id, cached: true, at: c.at }); return; }
     } catch {}
+  }
+
+  // Someone else is checking this exact thing right now (launch rush: everyone pastes the same CA)?
+  // Wait for their verdict instead of paying for the same check twice.
+  const live = store && cacheKey ? liveStore() : null;
+  if (live && !input.fresh){
+    const lk = await live.get(`p/${id}`, { type: "json" }).catch(() => null);
+    if (lk && Date.now() - lk.at < 70000){
+      send({ t: "step", msg: "Someone is checking this right now — waiting for their verdict" });
+      while (left() > 6000){
+        await sleep(2500);
+        const c = await live.get(`r/${id}`, { type: "json" }).catch(() => null);
+        if (c && c.at >= lk.at - 5000){ send({ t: "facts", data: c.facts }); send({ t: "report", data: c.report }); send({ t: "saved", id, cached: true, at: c.at }); return; }
+        if (!(await live.get(`p/${id}`, { type: "json" }).catch(() => null))) break; // their check failed
+      }
+      throw new Error("Couldn't finish this one — try again in a moment.");
+    }
+  }
+
+  // Fair use: a few fresh checks per person per hour, so nobody burns the launch budget.
+  if (!(process.env.OWNER_CODE && input.code === process.env.OWNER_CODE)){
+    const limited = await rateCheck(live || store, ctx.ip);
+    if (limited){ send({ t: "error", code: "rate", msg: limited }); return; }
+  }
+  if (live){
+    await live.setJSON(`p/${id}`, { at: Date.now() }).catch(() => {});
+    ctx.unlock = () => live.delete(`p/${id}`).catch(() => {});
   }
 
   let repliesP = null;
@@ -1695,7 +1755,7 @@ async function run(input, send){
   const model = left() < 40000 ? FAST_MODEL : MODEL;
   log(`asking ${model}, ${Math.round(left() / 1000)}s left`);
   let report;
-  try { report = scoreReport(await askClaude(buildPrompt(f, left() < 25000 ? 22000 : 45000), left() - 1000, model)); send({ t: "report", data: report }); log("done"); }
+  try { report = scoreReport(await askClaude(buildPrompt(f, left() < 25000 ? 22000 : 45000), left() - 1000, model, 2500, msg => send({ t: "step", msg }))); send({ t: "report", data: report }); log("done"); }
   catch (e) { if (e?.name === "TimeoutError") throw new Error("The analysis ran out of time. Try again."); throw e; }
 
   // Save it: share link + "recently checked".
@@ -1713,10 +1773,11 @@ async function run(input, send){
   }
 }
 
-export default async (request) => {
+export default async (request, context) => {
   if (request.method !== "POST") return new Response("Use POST", { status: 405 });
   let input;
   try { input = await request.json(); } catch { return new Response("Bad JSON", { status: 400 }); }
+  const ctx = { ip: context?.ip || request.headers.get("x-nf-client-connection-ip") || (request.headers.get("x-forwarded-for") || "").split(",")[0].trim() || null };
   const stream = new ReadableStream({
     async start(controller){
       const enc = new TextEncoder();
@@ -1727,8 +1788,9 @@ export default async (request) => {
       try {
         if (process.env.ACCESS_CODE && input.code !== process.env.ACCESS_CODE) send({ t: "error", code: "access", msg: "This beta needs an access code." });
         else if (!process.env.ANTHROPIC_API_KEY) send({ t: "error", msg: "The server is missing its ANTHROPIC_API_KEY. Add it in Netlify and redeploy." });
-        else await run(input || {}, send);
+        else await run(input || {}, send, ctx);
       } catch (e) { console.log("[pruf] error", e?.message || e); send({ t: "error", msg: String(e?.message || e) }); }
+      await ctx.unlock?.();
       clearInterval(beat); open = false;
       controller.close();
     },
