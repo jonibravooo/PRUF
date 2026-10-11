@@ -143,6 +143,13 @@ hr{border:0;border-top:1px solid var(--line);margin:0}
 .p-busted{background:var(--bad-bg);color:var(--bad)} .p-no_evidence{background:var(--info-bg);color:var(--info)}
 .tally{display:flex;flex-wrap:wrap;gap:6px}
 .tally span{font-size:.8rem;font-weight:600;padding:3px 9px;border-radius:999px;background:var(--field);color:var(--ink);font-variant-numeric:tabular-nums}
+.story{display:flex;flex-direction:column;gap:8px;border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:12px;padding:12px 14px}
+.story b{font-family:var(--f-title);font-size:.88rem;font-weight:700}
+.story p{margin:0;font-size:1rem;line-height:1.45}
+.rel{display:inline-flex;flex-wrap:wrap;align-items:center;gap:6px;align-self:flex-start;font-family:var(--f-mono);font-size:.76rem;border-radius:999px;padding:4px 10px;background:var(--info-bg);color:var(--info)}
+.rel i{font-style:normal;opacity:.8}
+.rel.r-official,.rel.r-acknowledged{background:var(--ok-bg);color:var(--ok)} .rel.r-tribute,.rel.r-unverified{background:var(--warn-bg);color:var(--warn)} .rel.r-impersonation{background:var(--bad-bg);color:var(--bad)}
+.rel-proof{font-size:.82rem;color:var(--muted)}
 .tldr{display:flex;gap:10px;align-items:baseline;background:var(--field);border-radius:12px;padding:12px 14px}
 .tldr b{flex:none;font-family:var(--f-mono);font-size:.72rem;color:var(--accent);letter-spacing:.06em}
 .tldr p{margin:0;font-size:.95rem;color:var(--ink)}
@@ -791,6 +798,14 @@ function renderReport(r){
   const tally = el("div",{class:"tally"});
   ["proven","trust","busted","no_evidence"].forEach(k => { if (counts[k]) tally.append(el("span",{}, face(k), `${counts[k]} ${STATUS[k]}`)); });
   if (claims.length) after.push(tally);
+  const REL = { official:"Official · it's theirs", acknowledged:"Acknowledged · not run by them", tribute:"Tribute coin · not affiliated", impersonation:"Poses as official · no proof", unverified:"Link not verified" };
+  const lk = r.link && r.link.subject && REL[r.link.relation] ? r.link : null;
+  if (r.story || lk){
+    const box = el("div",{class:"story"}, el("b",{text:"What's going on"}));
+    if (r.story) box.append(el("p",{text:r.story}));
+    if (lk){ box.append(el("span",{class:"rel r-"+lk.relation}, el("span",{text:lk.subject}), el("i",{text:"→"}), el("span",{text:REL[lk.relation]}))); if (lk.proof) box.append(el("span",{class:"rel-proof",text:lk.proof})); }
+    after.push(box);
+  }
   if (r.plain) after.push(el("div",{class:"plain"}, el("b",{text:"Bottom line"}), el("p",{}, el("span",{class:"hl",text:r.plain}))));
   if (r.crowd) after.push(el("div",{class:"plain crowd"}, el("b",{text:"What the replies say"}), el("p",{text:r.crowd})));
   if (r.summary) after.push(el("div",{class:"tldr"}, el("b",{text:"TL;DR"}), el("p",{text:r.summary})));

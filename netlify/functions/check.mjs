@@ -442,8 +442,23 @@ async function solanaMint(ca){
 // Free and present for almost every pump.fun-style token, unlike DexScreener's paid profile.
 const SOCIAL_HOSTS = /(^|\.)(x\.com|twitter\.com|t\.me|telegram\.me|discord\.gg|discord\.com|pump\.fun|dexscreener\.com|youtube\.com|tiktok\.com|instagram\.com)$/i;
 const ipfs = u => String(u).replace(/^ipfs:\/\//, "https://ipfs.io/ipfs/");
+// Any social account a token links to (X, TikTok, Instagram, YouTube, Kick, Twitch, GitHub…): {platform, handle, url, post}.
+// A coin linking to someone's account only proves the account exists — not that its owner is involved.
+const SOCIAL_PLATFORMS = [[/(^|\.)(x|twitter)\.com$/, "X"], [/(^|\.)tiktok\.com$/, "TikTok"], [/(^|\.)instagram\.com$/, "Instagram"], [/(^|\.)(youtube\.com|youtu\.be)$/, "YouTube"],
+  [/(^|\.)kick\.com$/, "Kick"], [/(^|\.)twitch\.tv$/, "Twitch"], [/(^|\.)github\.com$/, "GitHub"], [/(^|\.)(t\.me|telegram\.me)$/, "Telegram"], [/(^|\.)threads\.net$/, "Threads"], [/(^|\.)reddit\.com$/, "Reddit"]];
+function socialAccount(u){
+  const su = safeUrl(u); if (!su) return null;
+  const url = new URL(su); const h = url.hostname.toLowerCase();
+  const hit = SOCIAL_PLATFORMS.find(([re]) => re.test(h)); if (!hit) return null;
+  const seg = url.pathname.split("/").filter(Boolean);
+  let handle = seg[0] || null;
+  if (hit[1] === "YouTube" && /^(c|channel|user)$/.test(handle || "")) handle = seg[1] || null;
+  if (hit[1] === "Reddit" && /^(r|u|user)$/.test(handle || "")) handle = seg[1] ? `${seg[0]}/${seg[1]}` : null;
+  if (handle && /^(i|intent|home|share|search|watch|hashtag)$/i.test(handle)) handle = null;
+  return { platform: hit[1], handle: handle ? handle.replace(/^@/, "") : null, url: su, post: /\/(status|video|p|reel|shorts)\/|watch\?v=/.test(su) };
+}
 async function tokenMeta(ca){
-  const out = { website: null, twitter: null, telegram: null, description: null, creator: null, createdOn: null, updateAuthority: null, raw: null, from: [] };
+  const out = { website: null, twitter: null, telegram: null, description: null, creator: null, createdOn: null, updateAuthority: null, raw: null, from: [], links: [] };
   const take = j => {
     if (!j || typeof j !== "object") return;
     out.createdOn ||= j.createdOn || j.created_on || j.platform || j.launchpad || j.launchedOn || null;
@@ -468,6 +483,7 @@ async function tokenMeta(ca){
     for (const u of urls){
       const su = safeUrl(u); if (!su) continue;
       const h = new URL(su).hostname.toLowerCase();
+      const acct = socialAccount(su); if (acct && !out.links.some(l => l.url === acct.url) && out.links.length < 8) out.links.push(acct);
       if (/(^|\.)(x|twitter)\.com$/.test(h)) out.twitter ||= su;
       else if (/(^|\.)(t\.me|telegram\.me)$/.test(h)) out.telegram ||= su;
       else if (!SOCIAL_HOSTS.test(h) && !/ipfs|arweave|irys|cloudflare-ipfs|nftstorage|pinata|cdn\.|\.(png|jpe?g|gif|webp|svg|json)$/i.test(su)) out.website ||= su;
@@ -510,7 +526,7 @@ async function tokenMeta(ca){
 const LAUNCHPAD_HOSTS = [
   [/(^|\.)pump\.fun$/, "pump.fun"], [/(^|\.)(letsbonk|bonk)\.fun$/, "LetsBonk"], [/(^|\.)bags\.fm$/, "Bags"],
   [/(^|\.)believe\.app$/, "Believe"], [/moonshot/, "Moonshot"], [/(^|\.)heaven\.xyz$/, "Heaven"], [/(^|\.)raydium\.io$/, "Raydium LaunchLab"],
-  [/(^|\.)meteora\.ag$/, "Meteora"], [/(^|\.)jup\.ag$/, "Jupiter"], [/(^|\.)boop\.fun$/, "boop.fun"], [/paid/, "Paid"],
+  [/(^|\.)meteora\.ag$/, "Meteora"], [/(^|\.)jup\.ag$/, "Jupiter"], [/(^|\.)boop\.fun$/, "boop.fun"], [/paid/, "Paid"], [/(^|\.)agencypad\.fun$|tryagency/, "Agency"],
 ];
 function launchpadName(createdOn){
   if (!createdOn) return null;
@@ -525,6 +541,8 @@ function launchpadName(createdOn){
 const ECOSYSTEM = [
   { name: "Paid (UsePaid)", re: /\busepaid\b|\bpaid\.(?:fun|xyz|app)\b|\bvia\s+@?paid\b|@usepaid/i,
     ctx: "Not a launchpad program: a fee-routing service on top of normal pump.fun tokens. The token's creator fees are pointed to the UsePaid treasury; UsePaid claims them on a schedule and pays the X account named in the token's metadata. Split since 29 Sep 2026: 65% to the named X account, 10% UsePaid treasury, 25% buys back and burns $PAID (before: 80/20). Payouts were via X Money (paused 27 Sep 2026); since 28 Sep the named account claims by logging in with X on the UsePaid portal and giving a wallet. So: the named @account does NOT need to be involved or even know about the token — it's often someone famous who never agreed to anything. Fees reaching UsePaid is on-chain; the payout to the @account is off-chain (trust UsePaid). Own token: $PAID 98kfF7rmsg1QDUEoCqNE7g7M1FdrTt92TEp2CLzypump." },
+  { name: "Agency (AgencyPad)", re: /\bagencypad\.fun\b|@tryagency\b|\btryagency\b|\bagency\s?pad\b/i, addr: ["7VertkgF9KLhxxJXHX6uaWuoYZTP9LdGj2bWmVXVpump"],
+    ctx: "AI-run launchpad (Oct 2026, pump.fun-style curve). Whoever launches a coin picks an AI model (Claude, GPT, Grok…) and that AI then RUNS the coin: it writes the coin's X account (often @<Name>_agency), decides buybacks/burns, holder payouts, games or buying stuff. The launcher gets 0 creator fees — 100% go to the AI: first $20 pays its compute, $20–100 split 50/50 compute/treasury, above $100 15% of every claim buys and burns $AGENCY. The AI goes to sleep if fees are under ~0.1 SOL/hour, and early on only ~1–2% of Agency coins had an active AI. So: (1) the coin's X posts are written by an AI, not by a team and not by the real person/character it's named after; (2) anyone can launch a coin named after anyone — the name or a linked TikTok/X of a real person does NOT mean that person is involved; (3) an agencypad.fun/coin/<CA> 'website' is the launchpad's page, not a project site; (4) treasury and buybacks are run by the platform (anonymous team, single-signer custody, no audit) — trust Agency. Platform token: $AGENCY 7VertkgF9KLhxxJXHX6uaWuoYZTP9LdGj2bWmVXVpump." },
   { name: "Bags", re: /\bbags\.fm\b|\bon\s+bags\b|@bagsapp/i, addr: ["FEE2tBhCKAt7shrod19QttSVREUYPiyMzoku1mL1gqVK", "FEEhPbKVKnco9EXnaY3i4R5rQVUx91wgVfu8qokixywi"],
     ctx: "Launchpad on Meteora's bonding curve. Creator gets 1% of volume forever, and fees can be shared to social handles (X, TikTok, GitHub, Kick…) that Bags holds a wallet for — the person behind the handle can claim later. Fee split is on-chain (Bags Fee Share program). A handle getting fees does NOT mean that person is part of the team." },
   { name: "Believe", re: /\bbelieve\.app\b|\blaunchcoin\b|@believeapp/i, addr: ["5qWya6UjwWnGVhdSBL3hyZ7B45jbk6Byt1hwd7ohEGXE"],
@@ -685,7 +703,9 @@ async function launchBlock(ca, sigs, dev, supply){
 }
 
 async function launchAndDev(ca, meta, supply){
-  const out = { launchpad: launchpadName(meta?.createdOn), createdAt: null, launchProgram: null, programsInLaunchTx: [], dev: null };
+  // some launchpads (Agency) don't set createdOn but point "website" at their own /coin/<CA> page
+  const padSite = !meta?.createdOn && /\/(?:coin|token)\/[1-9A-HJ-NP-Za-km-z]{32,44}/.test(meta?.website || "") ? meta.website : null;
+  const out = { launchpad: launchpadName(meta?.createdOn || padSite), createdAt: null, launchProgram: null, programsInLaunchTx: [], dev: null };
   let launchSigs = [];
   let devAddr = meta?.creator || null;
   // The token's first transaction: who paid for it and which programs created it (young tokens only: < 1000 txs).
@@ -956,6 +976,7 @@ async function ogCheck(ca, name, symbol, myCreated, myImage){
   const others = list.filter(t => t.mint !== ca);
   const older = mine ? others.filter(t => isFinite(t.createdAt) && t.createdAt < mine).sort((a, b) => a.createdAt - b.createdAt) : [];
   const biggest = [...others].sort((a, b) => b.mc - a.mc)[0] || null;
+  if (biggest && mine && isFinite(biggest.createdAt)) biggest.launched = biggest.createdAt < mine ? "before this one" : "after this one (a later copy)";
   const imgCopies = Object.values(sameImg).sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
   return { imageCid: myCid, sameImage: imgCopies.slice(0, 5), sameImageOlder: mine ? imgCopies.filter(t => t.createdAt && t.createdAt < mine).length : null, sameNameOrTicker: others.length, og: !others.length ? true : mine ? !older.length : null, olderCount: older.length, oldest: older[0] || null, biggest, myMc: me?.mc || null, searched: "DexScreener + pump.fun search (Solana)" };
 }
@@ -1109,7 +1130,7 @@ function techSummary(f){
     else if (og.og === null) nLines.push(`${og.sameNameOrTicker} other token${og.sameNameOrTicker === 1 ? "" : "s"} share this name/ticker (couldn't date this one)`);
     else if (og.og) nLines.push(`OG: the first of ${og.sameNameOrTicker + 1} tokens with this name/ticker`);
     else nLines.push(`Not the OG: ${og.olderCount} older token${og.olderCount === 1 ? "" : "s"} with this name/ticker, first one ${ago(og.oldest.createdAt)} ago` + (og.oldest.mc ? ` (now ${usd(og.oldest.mc)})` : ""));
-    if (og.biggest && og.biggest.mc > Math.max(2 * (og.myMc || f.market?.marketCap || 0), 50000)) nLines.push(`Biggest one with this name: ${usd(og.biggest.mc)} (${short(og.biggest.mint)})`);
+    if (og.biggest && og.biggest.mc > Math.max(2 * (og.myMc || f.market?.marketCap || 0), 50000)) nLines.push((og.og && og.biggest.launched?.startsWith("after") ? `A later copy grew bigger: ${usd(og.biggest.mc)}` : `Biggest one with this name: ${usd(og.biggest.mc)}`) + ` (${short(og.biggest.mint)})`);
   }
   (nv.sources || []).forEach(src => {
     const t = Date.parse(src.at);
@@ -1171,6 +1192,7 @@ function buildPrompt(f, limit = 45000){
     github: f.github ? { ...f.github, readme: f.github.readme?.slice(0, 4000) } : "no GitHub found",
     token_market: f.market, token_mint: f.mint,
     token_metadata: f.meta ? { website: f.meta.website, twitter: f.meta.twitter, telegram: f.meta.telegram, created_on: f.meta.createdOn, update_authority: f.meta.updateAuthority, raw_metadata_json: f.meta.raw } : null,
+    linked_accounts: f.meta?.links?.length ? f.meta.links : "none besides the ones above",
     launch_and_dev_wallet: f.launch || null, x_profile: f.x ? { ...f.x, pinned: undefined, recentPosts: f.x.recentPosts ? `${f.x.recentPosts.length} posts, text below` : undefined } : null, domain: f.domain,
     token_site_linkage: f.linkage || "only one of CA / website was given or found",
     offchain_backend_verification: f.backend || "site doesn't call a server of its own",
@@ -1230,13 +1252,23 @@ Method:
    - Implied claims count: a coin named after a person/brand/event implies "this is THE coin for it"; a metadata X link to someone's post implies "this post is the source". List those as claims (e.g. "The OG $X", "Based on @elonmusk's post", "Official coin of <brand>") and verify each.
    - FIND THE CORE FIRST: what is the one thing this narrative stands on? The NAME/meme itself (a person, brand, event, character, "the X coin") — or something else: this exact CA (e.g. "this CA is in the Solana GitHub"), a tech, a post, a real-world thing, a dev/team. Judge every check by whether it touches the core.
    - OG/copycat matters ONLY when the core is the name/meme. Then it can be the headline and a red flag. When the core is anything else, OG never matters: don't put it in the headline, summary, plain or red flags (at most one neutral mention). Never judge an OG's importance by its market cap — small old OGs can matter, the trenches decide that, not the number.
-   - og_or_copycat: older tokens with the same name/ticker = this isn't the OG (when the name is the core); say how many, when the first one launched and how big it is. Being first = green flag. Never claim "OG" without this data.
+   - og_or_copycat: older tokens with the same name/ticker = this isn't the OG (when the name is the core); biggest.launched says if the biggest same-name coin came before or AFTER this one.
+   - OG status is ONE point, never split into a red and a green flag that read like a contradiction. "OG, but a later copy grew bigger" is a single fact — say it in one place, in those words. A bigger LATER copy is not a red flag for the OG (at most neutral context: the market also picked another one). say how many, when the first one launched and how big it is. Being first = green flag. Never claim "OG" without this data.
    - posts_the_coin_points_to: does the source post exist, who wrote it, before or after the coin? A real post by the real account, before launch = the narrative's source is "proven" (it doesn't mean that person is involved).
    - did_named_accounts_mention_it: the named person/brand posting the CA/ticker themselves = real link ("proven"); never posting it = no link, any "official"/"backed by" claim is "busted" (window is the last 7 days — say so).
    - Pure meme with no claims at all: say "pure meme, nothing to larp" in the headline, report OG status and the dev, and keep claims to what's implied.
 5m. PRUF'S MEMORY (prufy_memory): earlier PRUF checks that share this dev wallet, the dev's funder, the exact site code, the exact token image or the fee wallet. funderAsDev = the wallet that funded this dev was itself a dev PRUF checked. Same dev/funder with earlier Cap/Vapor verdicts = strong red flag; with earlier Real verdicts = green flag. Same site code or same image as another project = cloned project — name it. Cite the earlier project's title and verdict.
 5n. LEADS (leads_followed): PRUF just followed these leads to double-check unverified points. Use their results as evidence, and mention them in the "checked" field of the claims they settle. A lead that couldn't be checked stays unverified — don't guess its result.
 5o. x_posts_with_this_ca: who posted the CA on X in the last 7 days (accounts, followers). Context only (KOL interest, coordinated shilling by many tiny accounts) — never proof of the tech or story.
+5p. BORROWED IDENTITY — WHO IS THIS COIN ACTUALLY ABOUT, AND ARE THEY IN ON IT? Many coins are named after, or link to, a real person, AI character, creator, pet, brand, tweet or news story (see linked_accounts, token_metadata, posts_the_coin_points_to). Work it out like this:
+   - Name the SUBJECT (who/what the coin is about) and, when relevant, who CREATED/OWNS the subject (e.g. "Janie B — AI influencer made by a16z partner Olivia Moore"). Use the coin's text, linked accounts and leads.
+   - A real subject is NOT involvement. Linking someone's TikTok/X/YouTube only proves the account exists. Involvement needs: the subject or its owner posting the CA/ticker, claiming the fees, or the coin's metadata/X being theirs.
+   - Watch for lookalike names: a16z (the VC firm) ≠ ai16z (the ElizaOS token); a brand ≠ a fan account; "@Name_agency"/"@NameCoin" ≠ "@Name".
+   - Launchpad wrappers decide who is talking and who gets paid — check market_context_platforms_detected: on Agency the coin's X is written by an AI and fees go to that AI, not to the subject; on Paid/Bags fees go to a named handle that may never have agreed; on Believe the coin was spawned by a reply on X. Say it in plain words.
+   - After-the-fact acknowledgement (subject later posts about it, like Truth Terminal with GOAT) = "acknowledged", not "official"/"launched by".
+   - Pick ONE relation: "official" (subject/owner launched it or proves control), "acknowledged" (subject posted about it after launch, doesn't run it), "tribute" (fan/meme coin about a real subject, doesn't pretend to be official), "impersonation" (implies it's official/endorsed, or uses the subject's identity as if it were theirs, with no proof), "unverified" (can't tell yet). No subject at all → link.relation "none".
+   - Verdict follows the relation: a tribute that doesn't claim to be official is NOT Cap — its claims are just "the subject is real" (proven) and "subject involved" (no_evidence/busted). Claiming or implying "official", "backed by", "made by <subject>" without proof = busted.
+   - "story" must make a newcomer understand what's going on in one read: who launched what, on which platform, about whom, who runs it, and whether the subject is involved. Example: "Someone launched a coin on Agency named after Janie, the AI influencer made by a16z's Olivia Moore. An AI runs the coin and its X; no sign Olivia or a16z are involved."
 5d. X POSTS: the project's latest posts and pinned post are included in the project's text (when available). Promises made there count. Note if the account is silent, only shills, or its posts contradict the site.
 5. Common things that look like tech but aren't the project's own: using pump.fun / Meteora / Jupiter is real but it's someone else's tech; say so.
 6. Do NOT pad the report with token-safety items (mint authority, holders, liquidity). Mention them only if a promise depends on them.
@@ -1244,7 +1276,7 @@ Method:
 8. Write about the PROJECT, never about PRUF's own plumbing. Never mention libraries, polyfills or third-party repos (react, core-js, wallet-adapter…) as if they mattered, never say "PRUF couldn't read X" in the headline/summary/plain, and never list a missing GitHub as a finding unless they claim to be open source. When something isn't published, say it as the project's gap ("No program address published"), not as a search failure. If the app clearly works (real wallet signing, real API calls, real on-chain txs), say so first and give it credit as a claim.
 
 TRENCH CONTEXT — think like someone who lives in the Solana trenches:
-- Day-1 projects are normal. NEVER red-flag age by itself (new domain, new X account, new repo, new token), low follower counts, few commits, a site built with Lovable/v0/Bolt, or building on pump.fun/Meteora/Raydium/Bags. Mention these only as neutral context.
+- Day-1 projects are normal. NEVER red-flag age by itself — that includes "X account created hours before the token", "domain registered yesterday", "dev wallet 6 days old": that's how every launch looks (new domain, new X account, new repo, new token), low follower counts, few commits, a site built with Lovable/v0/Bolt, or building on pump.fun/Meteora/Raydium/Bags. Mention these only as neutral context.
 - Red flags that actually cost people money: the site asks wallets to sign transactions for a program nobody can verify; the team can change a program that holds or moves user funds; the dev holds a big share of supply; the dev is a serial launcher whose coins all died; the token isn't provably the project's own (copycat); fake on-screen numbers; promised fees/buybacks/rewards with no wallet or program behind them; leaked keys.
 - A dev who launched many coins is NOT bad by itself — judge the track record: earlier coins that graduated or ran hard (high peak market cap) are a strong green flag; many coins that never left the bonding curve mean the dev is exposed to the "launch and leave" pattern, mention it as a caution, not as proof of a scam.
 
@@ -1257,6 +1289,8 @@ WRITING STYLE — read by degens in 5-10 seconds, on a phone, mid-trade:
 
 Reply with ONLY one JSON object, English only:
 {"verdict":"trust","score":40,
+ "story":"<max 35 words, plain English, no slang: what is ACTUALLY happening — who launched what, where, about whom, who runs it, is the subject involved>",
+ "link":{"subject":"<who/what the coin is about, max 8 words, or empty>","relation":"official|acknowledged|tribute|impersonation|unverified|none","proof":"<max 14 words: the fact that decides the relation>"},
  "plain":"<bottom line, max 25 words, trench voice: what this really is today and the one thing that can burn you>",
  "headline":"<max 8 words, the punchline. e.g. 'AI agent is a server you can't see'>",
  "summary":"<TL;DR, max 25 words, 1-2 short sentences: what's real, what isn't>",
@@ -1365,8 +1399,12 @@ async function planLeads(f, model){
     ca_on_github: f.ghMentions ? { code: f.ghMentions.codeTotal ?? null, prs: f.ghMentions.prTotal ?? null } : null,
     replies: (f.replies?.replies || []).slice(0, 5).map(r => r.text),
     misses: f.misses,
+    token: { name: f.meta?.name || f.market?.name || null, symbol: f.meta?.symbol || f.market?.symbol || null, ca: f.ca || null },
+    linked_accounts: f.meta?.links || [],
+    platforms: (f.ecosystem || []).map(e => e.name),
   };
   const prompt = `You are PRUF's lead investigator. PRUF already collected the facts below about a crypto project. Your job: pick up to 4 follow-up lookups that would most change the verdict — specific claims or story points that are still UNVERIFIED and that one lookup could settle (a named partner, a claimed listing/integration, an "official" tie, a quoted post, a referenced address, a docs page, a rival/OG token, an accusation in the replies). Don't redo what's already done (CA GitHub search, OG search, the posts the coin links, dev wallet, fees, replies). Skip anything a lookup can't settle. Fewer is fine; [] if nothing is worth it.
+BORROWED IDENTITY: if the coin is named after or links to a real person/character/creator/brand (see linked_accounts, token name), one lead should check whether THEY (or whoever created them) ever posted this CA or ticker on X — e.g. search_x "from:<their X handle> (<CA> OR $<TICKER>)" — or who that subject is (open_url their page). Watch for lookalike names (a16z ≠ ai16z).
 
 Tools:
 ${Object.entries(LEAD_TOOLS).map(([k, v]) => `- ${k}: ${v}`).join("\n")}
@@ -1479,6 +1517,9 @@ async function run(input, send){
     if (mint.status === "fulfilled" && mint.value) f.mint = mint.value;
     if (m){
       f.meta = m;
+      for (const u of [...(f.market?.socials || []).map(x => x.url), ...(f.market?.websites || [])]){
+        const a = socialAccount(u); if (a && !m.links.some(l => l.url === a.url) && m.links.length < 10) m.links.push(a);
+      }
       if (!site && m.website) site = m.website;
       if (!handle && m.twitter && !isPostLink(m.twitter)) handle = xHandle(m.twitter);
       if (m.metaFailed && !m.website && !m.twitter) f.misses.push("Couldn't read the token's metadata file (IPFS too slow) — it may list a site and X that PRUF didn't see");
@@ -1587,7 +1628,7 @@ async function run(input, send){
 
   // Market context: which known platforms/services this project touches.
   f.ecosystem = detectEcosystem(
-    [...f.pages.map(p => p.text), f.meta?.raw ? JSON.stringify(f.meta.raw) : "", f.meta?.createdOn, f.x?.bio, f.launch?.launchpad?.host],
+    [...f.pages.map(p => p.text), f.meta?.raw ? JSON.stringify(f.meta.raw) : "", f.meta?.createdOn, f.x?.bio, f.launch?.launchpad?.host, f.meta?.website, ...(f.market?.websites || []), ...(f.market?.socials || []).map(x => x.url), ...f.pages.map(p => p.url)],
     [...(f.launch?.programsInLaunchTx || []).map(p => p.id), ...(f.launch?.dev?.topSolRecipients || []).map(r => r.to), f.launch?.dev?.address, ...(f.site?.solAddresses || [])]
   );
 
