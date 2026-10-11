@@ -335,12 +335,15 @@ button.primary:active{transform:translateY(0) scale(.98)}
 .xlink svg{width:14px;height:14px}
 .xlink:hover{color:var(--accent);background:var(--accent-soft)}
 @media (max-width:420px){.xlink span{display:none}.xlink{padding:8px}}
-.ca-bar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:var(--accent-soft);border:1px solid color-mix(in srgb,var(--accent) 30%,transparent);border-radius:16px;padding:10px 12px 10px 16px}
-.ca-k{font-family:var(--f-title);font-weight:800;color:var(--accent)}
-.ca-bar code{flex:1;min-width:0;font-family:var(--f-mono);font-size:.8rem;color:var(--ink);overflow-wrap:anywhere}
-.ca-bar button{padding:6px 14px;font-size:.82rem;background:var(--accent);border-color:var(--accent);color:#06140c;font-weight:700}
-.ca-bar a{font-size:.82rem;color:var(--muted);text-decoration:none}
+.ca-bar{display:flex;align-items:center;justify-content:flex-start;gap:10px;flex-wrap:wrap;font-size:.78rem;color:var(--faint);margin:-4px 0 2px}
+.ca-k{font-family:var(--f-mono);font-weight:500;color:var(--muted)}
+.ca-bar code{font-family:var(--f-mono);font-size:.78rem;color:var(--muted);background:none;border:0;padding:0;cursor:pointer}
+.ca-bar button{all:unset;cursor:pointer;font-family:var(--f-mono);font-size:.74rem;color:var(--faint);border-bottom:1px dotted currentColor;line-height:1.3}
+.ca-bar button:hover,.ca-bar code:hover{color:var(--accent)}
+.ca-bar button:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:2px}
+.ca-bar a{font-family:var(--f-mono);font-size:.74rem;color:var(--faint);text-decoration:none}
 .ca-bar a:hover{color:var(--accent)}
+.ca-sep{opacity:.5}
 
 
 /* ===== Case file: the page is Prufy's desk, the report is a sheet of paper, verdicts are rubber stamps ===== */
@@ -554,11 +557,13 @@ body{background:radial-gradient(ellipse 60% 520px at 78% -60px,var(--lamp),trans
     <img class="hero-prufy" src="/assets/prufy-inspect.webp" alt="" width="260" height="260">
   </section>
 
-  <div class="ca-bar" id="ca-bar" data-ca="__CA__" hidden>
+  <div class="ca-bar" id="ca-bar" data-ca="9YpDy28JPAFg5AxnzNfeQiz2qw7DTWmvK3V5RfzMpump" hidden>
     <span class="ca-k">$PRUF</span>
     <code id="ca-v"></code>
-    <button type="button" id="ca-copy">Copy CA</button>
-    <a id="ca-chart" target="_blank" rel="noopener noreferrer">Chart ↗</a>
+    <span class="ca-sep">·</span>
+    <button type="button" id="ca-copy">copy</button>
+    <span class="ca-sep">·</span>
+    <a id="ca-chart" target="_blank" rel="noopener noreferrer">chart ↗</a>
   </div>
 
   <form class="card" id="form" autocomplete="off" novalidate>
@@ -591,14 +596,14 @@ body{background:radial-gradient(ellipse 60% 520px at 78% -60px,var(--lamp),trans
   if (l.protocol !== "https:" || host !== l.hostname) l.replace("https://" + host + l.pathname + l.search + l.hash);
 })();
 const $ = id => document.getElementById(id);
-// Official $PRUF CA, written at build time from Netlify's PRUF_CA env var. Hidden until it's set.
+// Official $PRUF CA (hardcoded in the ca-bar; PRUF_CA in Netlify is no longer needed).
 (function(){
   const bar = document.getElementById("ca-bar"), ca = bar?.dataset.ca || "";
   if (!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(ca)) return;
-  document.getElementById("ca-v").textContent = ca;
+  const v = document.getElementById("ca-v"); v.textContent = ca.slice(0, 6) + "…" + ca.slice(-6); v.title = ca;
   document.getElementById("ca-chart").href = "https://dexscreener.com/solana/" + ca;
   const b = document.getElementById("ca-copy");
-  b.onclick = () => navigator.clipboard?.writeText(ca).then(() => { b.textContent = "Copied ✓"; setTimeout(() => b.textContent = "Copy CA", 1500); });
+  b.onclick = v.onclick = () => navigator.clipboard?.writeText(ca).then(() => { b.textContent = "copied ✓"; setTimeout(() => b.textContent = "copy", 1500); });
   bar.hidden = false;
 })();
 // Prufy's icon set: chunky, rounded strokes. ico() = bare icon, bub() = icon in a round tinted bubble.
