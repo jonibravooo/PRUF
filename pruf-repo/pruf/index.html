@@ -297,6 +297,19 @@ button.primary:active{transform:translateY(0) scale(.98)}
 .badge{font-family:var(--f-title);font-weight:700;font-size:.74rem;color:var(--accent);background:var(--accent-soft);border-color:transparent;padding:3px 11px 2px}
 .tweet{border-radius:0 14px 14px 0}
 
+/* X link + official CA */
+.nav-r{display:flex;align-items:center;gap:10px}
+.xlink{display:inline-flex;align-items:center;gap:7px;color:var(--ink);text-decoration:none;font-family:var(--f-title);font-weight:700;font-size:.88rem;background:var(--field);border-radius:999px;padding:6px 12px 5px;transition:color .15s,background .15s}
+.xlink svg{width:14px;height:14px}
+.xlink:hover{color:var(--accent);background:var(--accent-soft)}
+@media (max-width:420px){.xlink span{display:none}.xlink{padding:8px}}
+.ca-bar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:var(--accent-soft);border:1px solid color-mix(in srgb,var(--accent) 30%,transparent);border-radius:16px;padding:10px 12px 10px 16px}
+.ca-k{font-family:var(--f-title);font-weight:800;color:var(--accent)}
+.ca-bar code{flex:1;min-width:0;font-family:var(--f-mono);font-size:.8rem;color:var(--ink);overflow-wrap:anywhere}
+.ca-bar button{padding:6px 14px;font-size:.82rem;background:var(--accent);border-color:var(--accent);color:#06140c;font-weight:700}
+.ca-bar a{font-size:.82rem;color:var(--muted);text-decoration:none}
+.ca-bar a:hover{color:var(--accent)}
+
 /* Intro: Prufy looks around, investigating (first visit only) */
 #intro{position:fixed;inset:0;z-index:100;background:#080808;display:grid;place-items:center;cursor:pointer;transition:opacity .45s ease,visibility .45s}
 #intro.out{opacity:0;visibility:hidden}
@@ -363,13 +376,23 @@ button.primary:active{transform:translateY(0) scale(.98)}
       <img class="mark" src="/assets/prufy-base-sm.webp" alt="" width="36" height="36">
       PRUF
     </div>
-    <span class="badge">beta</span>
+    <div class="nav-r">
+      <a class="xlink" href="https://x.com/Prufscan" target="_blank" rel="noopener noreferrer" aria-label="PRUF on X (@Prufscan)"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M17.75 3h3.07l-6.7 7.66L22 21h-6.17l-4.83-6.32L5.47 21H2.4l7.17-8.2L2 3h6.33l4.37 5.77L17.75 3zm-1.08 16.2h1.7L7.4 4.73H5.58L16.67 19.2z"/></svg><span>@Prufscan</span></a>
+      <span class="badge">beta</span>
+    </div>
   </nav>
 
   <section class="hero">
     <h1>Is the tech <em>real</em>, or just a story?</h1>
     <p>Drop a CA, a site or an X post. Prufy reads the code, probes it on-chain and tells you what's real and what's cap.</p>
   </section>
+
+  <div class="ca-bar" id="ca-bar" data-ca="__CA__" hidden>
+    <span class="ca-k">$PRUF</span>
+    <code id="ca-v"></code>
+    <button type="button" id="ca-copy">Copy CA</button>
+    <a id="ca-chart" target="_blank" rel="noopener noreferrer">Chart ↗</a>
+  </div>
 
   <form class="card" id="form" autocomplete="off" novalidate>
     <div class="one">
@@ -388,6 +411,7 @@ button.primary:active{transform:translateY(0) scale(.98)}
   <footer>PRUF reads public data only. Not financial advice.<br>
     <a id="src" class="src" href="__REPO__/commit/__COMMIT__" target="_blank" rel="noopener noreferrer">Open source · running commit __SHORT__ ↗</a>
     <a id="repo" class="src" href="__REPO__" target="_blank" rel="noopener noreferrer">Code on GitHub ↗</a>
+    <a class="src" href="https://x.com/Prufscan" target="_blank" rel="noopener noreferrer">@Prufscan on X ↗</a>
   </footer>
 </div>
 
@@ -400,6 +424,16 @@ button.primary:active{transform:translateY(0) scale(.98)}
   if (l.protocol !== "https:" || host !== l.hostname) l.replace("https://" + host + l.pathname + l.search + l.hash);
 })();
 const $ = id => document.getElementById(id);
+// Official $PRUF CA, written at build time from Netlify's PRUF_CA env var. Hidden until it's set.
+(function(){
+  const bar = document.getElementById("ca-bar"), ca = bar?.dataset.ca || "";
+  if (!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(ca)) return;
+  document.getElementById("ca-v").textContent = ca;
+  document.getElementById("ca-chart").href = "https://dexscreener.com/solana/" + ca;
+  const b = document.getElementById("ca-copy");
+  b.onclick = () => navigator.clipboard?.writeText(ca).then(() => { b.textContent = "Copied ✓"; setTimeout(() => b.textContent = "Copy CA", 1500); });
+  bar.hidden = false;
+})();
 // Prufy's icon set: chunky, rounded strokes. ico() = bare icon, bub() = icon in a round tinted bubble.
 const SVGNS = "http://www.w3.org/2000/svg";
 function ico(name){ const s = document.createElementNS(SVGNS, "svg"); s.setAttribute("class", "ic"); s.setAttribute("aria-hidden", "true"); const u = document.createElementNS(SVGNS, "use"); u.setAttribute("href", "#i-" + name); s.append(u); return s; }
