@@ -35,6 +35,7 @@ Deploy to Netlify and set these environment variables:
 | `SOLANA_RPC_URL` | recommended | A Helius RPC URL (on-chain probes, DAS, dev wallet history) |
 | `GITHUB_TOKEN` | recommended | Higher GitHub API limits |
 | `X_BEARER_TOKEN` | optional | Reads a project's latest X posts |
+| `X_MAX_REPLIES` | optional | Replies read under the checked post (default 15, `0` = off) |
 | `JINA_API_KEY` | optional | Faster website reading |
 
 No keys live in this repo.

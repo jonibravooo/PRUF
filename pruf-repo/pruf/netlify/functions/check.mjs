@@ -3,6 +3,13 @@
 // reads the GitHub repo, then asks Claude to match each promised feature against that evidence.
 // Streams newline-delimited JSON events: {t:"step"}, {t:"facts"}, {t:"report"}, {t:"error"}.
 
+import { getStore } from "@netlify/blobs";
+import { createHash } from "node:crypto";
+
+// Saved reports: share links, "recently checked", and a 6h cache so the same check isn't paid twice.
+function reportStore(){ try { return getStore("reports"); } catch { return null; } }
+const reportId = key => createHash("sha1").update(String(key).toLowerCase()).digest("hex").slice(0, 10);
+
 const SOL_RPC = process.env.SOLANA_RPC_URL || "https://api.mainnet-beta.solana.com";
 const MODEL = process.env.ANTHROPIC_MODEL || "claude-sonnet-5-5";
 const FAST_MODEL = process.env.ANTHROPIC_FAST_MODEL || "claude-haiku-4-5-20251001";
@@ -126,6 +133,12 @@ const LIBS = [
   ["Meteora SDK", /meteora-ag|dbcij3LWUppWqq96dh6gJWwBifmcGfLSB5D4DuSMaqN/],
   ["Game engine", /phaser|pixi\.js|PIXI\.|three\.module|THREE\.WebGLRenderer|unity(?:loader|instance)/i],
 ];
+// GitHub orgs of common libraries: a link to these is a dependency, not the project's own code.
+const LIB_ORGS = /^(zloirock|babel|webpack|rollup|evanw|feross|indutny|paulmillr|dcodeio|mozilla|whatwg|w3c|sindresorhus|isaacs|floating-ui|popperjs|juliangarnier|motiondivision|remix-run|vercel-labs|nuxt|angular|preactjs|solidjs|lit|immerjs|reduxjs|date-fns|moment|iamkun|chenglou|framer-motion|kentcdodds|testing-library|jestjs|vitest-dev|prettier|eslint|typescript-eslint|microsoft|DefinitelyTyped|ai|ethereum|bitcoinjs|dfinity|near|aptos-labs|MystenLabs|wagmi-dev|rainbow-me|privy-io|dynamic-labs|phantom|solflare-wallet|backpack-app|coinbase|trustwallet|ledgerhq|supabase|vercel|facebook|reactjs|solana-labs|solana-foundation|anza-xyz|coral-xyz|solana-developers|metaplex-foundation|walletconnect|reown-com|wevm|ethers-io|web3|tailwindlabs|vitejs|nextjs|sveltejs|vuejs|google|microsoft|openai|anthropics|jup-ag|raydium-io|orca-so|meteoraag|pump-fun|helius-labs|firebase|stripe|getsentry|lovable-dev|gpt-engineer-app|framer|mui|radix-ui|shadcn-ui|shadcn|lucide-icons|tanstack|axios|lodash|twbs|jquery|socketio|apollographql|prisma|trpc|vuetifyjs|chakra-ui|emotion-js|styled-components|zustand|pmndrs|d3|chartjs|mrdoob|greensock|tweenjs|necolas|npm|nodejs|denoland|github|actions|features|sponsors|about|pricing|login|topics|orgs|marketplace)$/i;
+
+// Repos that are libraries, whoever hosts them: never the project's own code.
+const LIB_REPOS = /^(core-js|babel|regenerator|webpack|rollup|esbuild|vite|polyfill|.*polyfills?|react|react-dom|vue|svelte|next\.js|tailwindcss|three\.js|lodash|axios|moment|dayjs|buffer|bn\.js|bs58|base-x|tweetnacl(-js)?|elliptic|noble-.*|ethers\.js|web3\.js|solana-web3\.js|wallet-adapter|anchor|spl-token|jquery|bootstrap|font-awesome|fontawesome|swiper|gsap|animejs|lottie-web|howler\.js|socket\.io(-client)?|pako|zod|immer|redux|zustand|uuid|qs|crypto-js|js-sha3|eventemitter3|tslib|whatwg-fetch|normalize\.css|modernizr|highlight\.js|marked|dompurify|chart\.js|d3|pixi\.js|phaser|matter-js)$/i;
+const isLibRepo = (owner, repo) => LIB_ORGS.test(owner || "") || LIB_REPOS.test(String(repo || "").replace(/\.git$/, ""));
 const BUILDERS = [["Lovable", /lovable|gpt-engineer/i], ["v0", /v0\.dev|vercel-v0/i], ["Bolt", /bolt\.new|stackblitz/i], ["Framer", /framerusercontent|framer\.com\/m\//i], ["Webflow", /webflow/i], ["Wix", /wixstatic|wix\.com/i], ["Carrd", /carrd\.co/i]];
 const SERVICES = [
   ["Solana RPC", /helius-rpc|helius\.xyz|quiknode|alchemy\.com|rpcpool|triton|mainnet-beta\.solana|ankr\.com/i],
@@ -190,9 +203,12 @@ async function siteForensics(url){
   // Off-chain backend: which of its own server endpoints the site calls, and which public commit it says it runs.
   out.apiPaths = [...new Set([...code.matchAll(/["'`](?:https?:\/\/[^"'`\/]+)?(\/(?:api|\.netlify\/functions|functions|v1)\/[A-Za-z0-9_\-\/.]{1,60})["'`?]/g)]
     .map(m => m[1].replace(/\/$/, "")))].filter(p => !/\.(js|css|png|svg|webp|jpg|json)$/i.test(p)).slice(0, 10);
-  out.githubLinks = [...new Set([...code.matchAll(/https?:\/\/github\.com\/[\w.-]+\/[\w.-]+[^"'`\s<)]*/g)].map(m => m[0]))].slice(0, 10);
+  // Only links a visitor can see (no <script>/<style>/comments: libraries like core-js stamp their own GitHub link there).
+  const visible = html.replace(/<script[\s\S]*?<\/script>/gi, " ").replace(/<style[\s\S]*?<\/style>/gi, " ").replace(/<!--[\s\S]*?-->/g, " ");
+  out.githubLinks = [...new Set([...visible.matchAll(/https?:\/\/github\.com\/[\w.-]+\/[\w.-]+[^"'`\s<)]*/g)].map(m => m[0]))]
+    .filter(u => !isLibRepo(u.split("/")[3], u.split("/")[4])).slice(0, 10);
   const cm = code.match(/github\.com\/([\w.-]+)\/([\w.-]+)\/(?:commit|tree)\/([0-9a-f]{7,40})/i);
-  if (cm) out.deployedCommit = { repo: `${cm[1]}/${cm[2]}`, sha: cm[3].toLowerCase(), source: "commit link on the site" };
+  if (cm && !isLibRepo(cm[1], cm[2])) out.deployedCommit = { repo: `${cm[1]}/${cm[2]}`, sha: cm[3].toLowerCase(), source: "commit link on the site" };
   if (!out.deployedCommit){
     try {
       const v = await req(new URL("/version.json", base).href, { ms: 4000 });
@@ -284,7 +300,7 @@ async function probeSolana(addrs){
 async function githubDeep(links){
   const headers = { accept: "application/vnd.github+json" };
   if (process.env.GITHUB_TOKEN) headers.authorization = "Bearer " + process.env.GITHUB_TOKEN;
-  const gh = links.map(l => l.match(/github\.com\/([\w.-]+)(?:\/([\w.-]+))?/i)).find(m => m && !["features", "about", "pricing", "login", "solana-labs", "anza-xyz", "coral-xyz", "facebook", "vercel", "sponsors"].includes(m[1].toLowerCase()));
+  const gh = links.map(l => l.match(/github\.com\/([\w.-]+)(?:\/([\w.-]+))?/i)).find(m => m && !isLibRepo(m[1], m[2]));
   if (!gh) return null;
   let [, owner, repo] = gh;
   if (!repo){
@@ -355,6 +371,7 @@ async function dexscreener(ca){
   return {
     chainId: top.chainId, name: top.baseToken.name, symbol: top.baseToken.symbol, image: withInfo.info?.imageUrl || null,
     venues: [...new Set(pairs.map(p => p.dexId))], pairCount: pairs.length, pairUrl: top.url,
+    pumpswapPair: pairs.find(p => p.dexId === "pumpswap")?.pairAddress || null,
     createdAt: Math.min(...pairs.map(p => p.pairCreatedAt || Infinity)),
     liquidityUsd: pairs.reduce((s, p) => s + (p.liquidity?.usd || 0), 0), marketCap: top.marketCap ?? top.fdv ?? null,
     volume24h: pairs.reduce((s, p) => s + (p.volume?.h24 || 0), 0),
@@ -419,16 +436,22 @@ async function tokenMeta(ca){
     if (a) out.from.push("token metadata");
   } catch {}
   if (uri){
-    try { const j = await req(ipfs(uri), { ms: 6000 }); take(j); const { image, ...rest } = j || {}; out.raw = JSON.stringify(rest).slice(0, 1500); }
-    catch {
-      const cid = (ipfs(uri).match(/\/ipfs\/(.+)$/) || [])[1];
-      if (cid) try { take(await req("https://gateway.pinata.cloud/ipfs/" + cid, { ms: 5000 })); } catch {}
-    }
+    // Metadata JSON: race the original link and several IPFS gateways, first good answer wins.
+    const cid = (ipfs(uri).match(/\/ipfs\/([^?#]+)/) || [])[1];
+    const urls = [ipfs(uri), ...(cid ? ["https://ipfs.io/ipfs/", "https://dweb.link/ipfs/", "https://gateway.pinata.cloud/ipfs/", "https://pump.mypinata.cloud/ipfs/", "https://w3s.link/ipfs/", "https://nftstorage.link/ipfs/"].map(g => g + cid) : [])];
+    const tries = [...new Set(urls)].map(u => req(u, { ms: 7000 }).then(j => (j && typeof j === "object" ? j : Promise.reject())));
+    try {
+      const j = await Promise.any(tries);
+      take(j); const { image, ...rest } = j || {}; out.raw = JSON.stringify(rest).slice(0, 1500);
+    } catch { out.metaFailed = true; }
   }
   if (!out.website || !out.twitter || !out.creator){
+    // pump.fun's own API, with browser-like headers (it often rejects plain server requests).
+    const H = { accept: "application/json", origin: "https://pump.fun", referer: "https://pump.fun/" };
     try {
-      const p = await req(`https://frontend-api-v3.pump.fun/coins/${ca}`, { ms: 5000 });
-      if (p && p.mint){ take(p); out.creator = p.creator || null; out.from.push("pump.fun"); }
+      const p = await Promise.any([`https://frontend-api-v3.pump.fun/coins/${ca}`, `https://frontend-api-v2.pump.fun/coins/${ca}`]
+        .map(u => req(u, { ms: 6000, headers: H }).then(x => (x && x.mint ? x : Promise.reject()))));
+      take(p); out.creator ||= p.creator || null; out.from.push("pump.fun");
     } catch {}
   }
   const site = safeUrl(out.website);
@@ -497,8 +520,119 @@ function heliusKey(){
   try { return new URL(SOL_RPC).searchParams.get("api-key"); } catch { return null; }
 }
 
+// Every coin this wallet created before, and how many are still trading.
+async function devCoins(dev, ca){
+  let mints = [], pumpInfo = {};
+  try {
+    const H = { accept: "application/json", origin: "https://pump.fun", referer: "https://pump.fun/" };
+    const r = await req(`https://frontend-api-v3.pump.fun/coins/user-created-coins/${dev}?offset=0&limit=50&includeNsfw=true`, { ms: 5000, headers: H });
+    for (const c of (Array.isArray(r) ? r : r?.coins || [])){
+      if (!c?.mint) continue;
+      mints.push(c.mint);
+      // pump.fun knows if a coin graduated and (in newer API versions) its all-time-high market cap.
+      pumpInfo[c.mint] = { graduated: !!(c.complete || c.raydium_pool || c.pump_swap_pool), ath: Number(c.ath_market_cap || c.usd_market_cap || 0), symbol: c.symbol };
+    }
+  } catch {}
+  const key = heliusKey();
+  if (!mints.length && key){
+    try {
+      const txs = await req(`https://api.helius.xyz/v0/addresses/${dev}/transactions?api-key=${encodeURIComponent(key)}&type=CREATE&limit=50`, { ms: 7000 });
+      mints = (txs || []).flatMap(t => (t.tokenTransfers || []).map(x => x.mint)).filter(Boolean);
+    } catch {}
+  }
+  mints = [...new Set(mints)].filter(m => m !== ca && m !== "So11111111111111111111111111111111111111112");
+  if (!mints.length) return { count: 0 };
+  const sample = mints.slice(0, 30);
+  const out = { count: mints.length, checked: sample.length, stillTrading: 0, graduated: 0, best: null };
+  for (const m of mints){ const p = pumpInfo[m]; if (!p) continue; if (p.graduated) out.graduated++; if (p.ath && (!out.best || p.ath > out.best.mc)) out.best = { mc: p.ath, symbol: p.symbol, mint: m, ath: true }; }
+  try {
+    const j = await req(`https://api.dexscreener.com/latest/dex/tokens/${sample.join(",")}`, { ms: 6000 });
+    const by = {};
+    for (const p of j.pairs || []){
+      const m = p.baseToken?.address; const mc = p.marketCap ?? p.fdv ?? 0; const liq = p.liquidity?.usd || 0;
+      if (!by[m] || mc > by[m].mc) by[m] = { mc, liq, symbol: p.baseToken?.symbol };
+    }
+    for (const m of sample){
+      const x = by[m]; if (!x) continue;
+      if (x.liq > 5000) out.stillTrading++;
+      if (!pumpInfo[m] && x.liq > 0) out.graduated++; // on a DEX pool already = left the bonding curve
+      if (!out.best || x.mc > out.best.mc) out.best = { ...x, mint: m };
+    }
+  } catch {}
+  return out;
+}
+
+// ---------- dev deep-dive: what the dev did with this coin, who funded the wallet, who bought in the launch block ----------
+// Exchange hot wallets: funding from these is normal (fresh wallet bought SOL on a CEX), and says nothing bad.
+const CEX = {
+  "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM": "Binance", "5tzFkiKscXHK5ZXCGbXZxdw7gTjjD1mBwuoFbhLHvKa": "Binance",
+  "H8sMJSCQxfKiFTCfDR3DUMLPwcRbM61LGFJ8N4dK3WjS": "Coinbase", "2AQdpHJ2JpcEgPiATUXjQxA8QmafFegfQwSLWSprPicm": "Coinbase", "GJRs4FwHtemZ5ZE9x3FNvJ8TMwitKTh21yxdRPqn7npE": "Coinbase",
+  "5VCwKtCXgCJ6kit5FybXjvriW3xELsFDhYrPSqtJNmcD": "OKX", "AC5RDfQFmDS1deWZos921JfqscXdByf8BKHs5ACWjtW2": "Bybit", "FWznbcNXWQuHTawe9RxvQ2LdCENssh12dsznf4RiouN5": "Kraken",
+};
+async function heliusParse(sigs){
+  const key = heliusKey();
+  if (!key || !sigs?.length) return [];
+  const r = await req(`https://api.helius.xyz/v0/transactions?api-key=${encodeURIComponent(key)}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ transactions: sigs.slice(0, 100) }), ms: 8000 });
+  return Array.isArray(r) ? r : [];
+}
+// Bought / sold / moved, from the dev's parsed history. "moved" = plain transfers to other wallets (supply parked elsewhere).
+function devTrades(txs, dev, ca){
+  let bought = 0, sold = 0, moved = 0; const to = new Set(); let seen = false;
+  for (const t of txs || []) for (const x of t.tokenTransfers || []){
+    if (x.mint !== ca) continue;
+    const a = Number(x.tokenAmount) || 0; seen = true;
+    if (x.toUserAccount === dev && x.fromUserAccount !== dev) bought += a;
+    else if (x.fromUserAccount === dev && x.toUserAccount && x.toUserAccount !== dev){
+      if (t.type === "TRANSFER"){ moved += a; to.add(x.toUserAccount); } else sold += a;
+    }
+  }
+  return seen ? { bought, sold, moved, movedTo: to.size, sample: (txs || []).length } : null;
+}
+// The wallet's first incoming SOL: an exchange, a fresh hop, or another dev's wallet?
+async function devFunding(dev, oldestSigs){
+  const txs = (await heliusParse(oldestSigs)).sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+  let f = null;
+  for (const t of txs){
+    const n = (t.nativeTransfers || []).find(n => n.toUserAccount === dev && n.fromUserAccount && n.fromUserAccount !== dev && n.amount >= 1e7);
+    if (n){ f = { from: n.fromUserAccount, sol: Math.round(n.amount / 1e7) / 100, at: t.timestamp ? new Date(t.timestamp * 1000).toISOString() : null }; break; }
+  }
+  if (!f) return null;
+  f.label = CEX[f.from] || KNOWN[f.from] || null;
+  if (f.label) return f;
+  const H = { accept: "application/json", origin: "https://pump.fun", referer: "https://pump.fun/" };
+  const [sg, coins] = await Promise.allSettled([
+    rpc("getSignaturesForAddress", [f.from, { limit: 1000 }]),
+    req(`https://frontend-api-v3.pump.fun/coins/user-created-coins/${f.from}?offset=0&limit=50&includeNsfw=true`, { ms: 5000, headers: H }),
+  ]);
+  if (sg.status === "fulfilled") f.funderTxs = sg.value.length >= 1000 ? "1000+" : sg.value.length;
+  if (coins.status === "fulfilled"){ const c = Array.isArray(coins.value) ? coins.value : coins.value?.coins || []; f.funderLaunched = c.filter(x => x?.mint).length; }
+  return f;
+}
+// Everyone who got the token in the creation block: the dev's buy plus any bundled wallets.
+async function launchBlock(ca, sigs, dev, supply){
+  const txs = await heliusParse(sigs);
+  const curve = (() => { try { return pda([Buffer.from("bonding-curve"), b58dec(ca)], PUMP); } catch { return null; } })();
+  const got = {};
+  for (const t of txs) for (const x of t.tokenTransfers || []){
+    if (x.mint !== ca || !x.toUserAccount || x.toUserAccount === curve) continue;
+    got[x.toUserAccount] = (got[x.toUserAccount] || 0) + (Number(x.tokenAmount) || 0);
+  }
+  const others = Object.entries(got).filter(([w]) => w !== dev).sort((a, b) => b[1] - a[1]);
+  const out = { txs: txs.length, wallets: others.length, devPct: supply && got[dev] ? (got[dev] / supply) * 100 : 0, otherPct: supply ? (others.reduce((t, [, a]) => t + a, 0) / supply) * 100 : null };
+  if (others.length && supply){
+    const top = others.slice(0, 8);
+    const held = await Promise.allSettled(top.map(([w]) => rpc("getTokenAccountsByOwner", [w, { mint: ca }, { encoding: "jsonParsed" }])));
+    let still = 0, n = 0;
+    held.forEach(h => { if (h.status !== "fulfilled") return; n++; still += (h.value?.value || []).reduce((t, a) => t + Number(a.account?.data?.parsed?.info?.tokenAmount?.uiAmount || 0), 0); });
+    if (n) out.stillHoldPct = (still / supply) * 100;
+    out.checkedHolders = n;
+  }
+  return out;
+}
+
 async function launchAndDev(ca, meta, supply){
   const out = { launchpad: launchpadName(meta?.createdOn), createdAt: null, launchProgram: null, programsInLaunchTx: [], dev: null };
+  let launchSigs = [];
   let devAddr = meta?.creator || null;
   // The token's first transaction: who paid for it and which programs created it (young tokens only: < 1000 txs).
   try {
@@ -506,6 +640,7 @@ async function launchAndDev(ca, meta, supply){
     if (sigs.length && sigs.length < 1000){
       const first = sigs[sigs.length - 1];
       out.createdAt = first.blockTime ? new Date(first.blockTime * 1000).toISOString() : null;
+      launchSigs = sigs.filter(s => s.slot === first.slot && !s.err).map(s => s.signature).slice(-40);
       const tx = await rpc("getTransaction", [first.signature, { maxSupportedTransactionVersion: 0, encoding: "jsonParsed" }]);
       const keys = tx?.transaction?.message?.accountKeys || [];
       devAddr ||= keys[0]?.pubkey || null;
@@ -527,15 +662,18 @@ async function launchAndDev(ca, meta, supply){
       const amt = (r?.value || []).reduce((s, a) => s + Number(a.account?.data?.parsed?.info?.tokenAmount?.uiAmount || 0), 0);
       dev.holdsPct = supply ? (amt / supply) * 100 : null;
     }),
-    rpc("getSignaturesForAddress", [devAddr, { limit: 1000 }]).then(sg => {
+    rpc("getSignaturesForAddress", [devAddr, { limit: 1000 }]).then(async sg => {
       dev.txCount = sg.length >= 1000 ? "1000+" : sg.length;
       if (sg.length) dev.oldestTxInSample = sg.at(-1).blockTime ? new Date(sg.at(-1).blockTime * 1000).toISOString() : null;
+      // Wallet's whole history fits in the sample → its first txs show who funded it.
+      if (sg.length && sg.length < 1000) try { dev.funding = await devFunding(devAddr, sg.slice(-4).map(s => s.signature)); } catch {}
     }),
   ];
   const key = heliusKey();
   if (key){
     // Follow the money: the dev wallet's recent activity, parsed by Helius.
-    tasks.push(req(`https://api.helius.xyz/v0/addresses/${devAddr}/transactions?api-key=${encodeURIComponent(key)}&limit=50`, { ms: 8000 }).then(txs => {
+    tasks.push(req(`https://api.helius.xyz/v0/addresses/${devAddr}/transactions?api-key=${encodeURIComponent(key)}&limit=100`, { ms: 8000 }).then(txs => {
+      dev.trades = devTrades(txs, devAddr, ca);
       const types = {}; const outSol = {}; const claims = [];
       for (const t of txs || []){
         types[t.type || "UNKNOWN"] = (types[t.type || "UNKNOWN"] || 0) + 1;
@@ -550,9 +688,96 @@ async function launchAndDev(ca, meta, supply){
       dev.sampleSize = (txs || []).length;
     }));
   }
+  tasks.push(devCoins(devAddr, ca).then(c => { dev.otherCoins = c; }));
+  if (key && launchSigs.length) tasks.push(launchBlock(ca, launchSigs, devAddr, supply).then(b => { out.launchBlock = b; }).catch(() => {}));
   await Promise.allSettled(tasks);
   out.dev = dev;
   return out;
+}
+
+// ---------- creator fees: where pump.fun / PumpSwap creator fees really go, read straight from the accounts ----------
+// Layouts from pump.fun's public IDLs (github.com/pump-fun/pump-public-docs). Every read checks owner + discriminator,
+// so an unexpected account gives "unknown", never a wrong answer.
+const PUMP = "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P", PUMP_AMM = "pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA", PUMP_FEES = "pfeeUxB6jkeY1Hxd7CsFCAjcbHA9rWtchMGdZ6VojVZ";
+const SYSTEM = "11111111111111111111111111111111";
+function b58dec(s){
+  let n = 0n; for (const ch of s){ const i = B58.indexOf(ch); if (i < 0) throw new Error("bad base58"); n = n * 58n + BigInt(i); }
+  const out = []; while (n > 0n){ out.unshift(Number(n & 255n)); n >>= 8n; }
+  for (const ch of s){ if (ch === "1") out.unshift(0); else break; }
+  return Uint8Array.from(out);
+}
+const FP = 2n ** 255n - 19n;
+const fmod = a => ((a % FP) + FP) % FP;
+function fpow(b, e){ let r = 1n; b = fmod(b); while (e > 0n){ if (e & 1n) r = r * b % FP; b = b * b % FP; e >>= 1n; } return r; }
+const ED_D = fmod(-121665n * fpow(121666n, FP - 2n));
+// Is this 32-byte string a valid ed25519 point? PDAs are the ones that are NOT.
+function onCurve(k){
+  let y = 0n; for (let i = 31; i >= 0; i--) y = (y << 8n) | BigInt(i === 31 ? k[i] & 0x7f : k[i]);
+  if (y >= FP) return false;
+  const y2 = y * y % FP, x2 = fmod(y2 - 1n) * fpow(fmod(ED_D * y2 + 1n), FP - 2n) % FP;
+  if (x2 === 0n) return (k[31] & 0x80) === 0;
+  return fpow(x2, (FP - 1n) / 2n) === 1n;
+}
+function pda(seeds, programId){
+  const prog = b58dec(programId);
+  for (let bump = 255; bump >= 0; bump--){
+    const h = createHash("sha256"); seeds.forEach(s => h.update(s)); h.update(Uint8Array.of(bump)); h.update(prog); h.update("ProgramDerivedAddress");
+    const k = h.digest(); if (!onCurve(k)) return b58(k);
+  }
+  return null;
+}
+const hasDisc = (d, disc) => d.length >= 8 && disc.every((x, i) => d[i] === x);
+async function creatorFees(ca, market){
+  const curve = pda([Buffer.from("bonding-curve"), b58dec(ca)], PUMP);
+  const pool = market?.pumpswapPair || null;
+  const res = await rpc("getMultipleAccounts", [[curve, pool].filter(Boolean), { encoding: "base64" }]);
+  const cv = res?.value?.[0], pv = pool ? res?.value?.[1] : null;
+  const out = { venue: null, recipient: null, graduated: null, holderRewards: false, cashback: false, curve };
+  let rcpt = null;
+  if (cv?.owner === PUMP){
+    const d = b64(cv.data[0]);
+    if (d.length >= 81 && hasDisc(d, [23, 183, 248, 55, 96, 216, 172, 96])){
+      out.venue = "pump.fun"; out.graduated = d[48] === 1; rcpt = b58(d.slice(49, 81));
+      if (d.length > 82) out.cashback = d[82] === 1;
+      if (d.length > 124) out.holderRewards = d[124] === 1;
+    }
+  }
+  if (pv?.owner === PUMP_AMM){
+    const d = b64(pv.data[0]);
+    if (d.length >= 243 && hasDisc(d, [241, 154, 109, 4, 17, 177, 109, 188]) && b58(d.slice(43, 75)) === ca){
+      const cc = b58(d.slice(211, 243));
+      if (cc !== SYSTEM){ rcpt = cc; out.venue = "PumpSwap"; out.graduated = true; }
+      if (d.length > 244) out.cashback ||= d[244] === 1;
+      if (d.length > 270) out.holderRewards ||= d[270] === 1;
+    }
+  }
+  if (!rcpt || rcpt === SYSTEM) return out.venue ? { ...out, kind: "none" } : null;
+  out.recipient = rcpt;
+  if (out.holderRewards){ out.kind = "holders"; return out; }
+  const acc = (await rpc("getMultipleAccounts", [[rcpt], { encoding: "base64" }]))?.value?.[0];
+  if (acc?.owner === PUMP_FEES){
+    const d = b64(acc.data[0]);
+    if (d.length >= 80 && hasDisc(d, [216, 74, 9, 0, 56, 140, 93, 75])){
+      const dv = new DataView(d.buffer, d.byteOffset, d.length);
+      out.kind = "split"; out.active = d[10] === 1; out.locked = d[75] === 1; out.shares = [];
+      const n = Math.min(dv.getUint32(76, true), 10);
+      for (let i = 0; i < n; i++){ const o = 80 + i * 34; if (o + 34 > d.length) break; out.shares.push({ address: b58(d.slice(o, o + 32)), pct: dv.getUint16(o + 32, true) / 100 }); }
+      out.shares.sort((a, b) => b.pct - a.pct);
+    } else out.kind = "program";
+  } else if (!acc || acc.owner === SYSTEM){ out.kind = "wallet"; out.sol = acc ? acc.lamports / 1e9 : 0; }
+  else { out.kind = "program"; out.owner = acc.owner; }
+  return out;
+}
+// Name the addresses once we know who the dev is.
+function labelFees(fees, dev){
+  if (!fees) return fees;
+  fees.devKnown = !!dev;
+  const label = a => a === dev ? "dev wallet" : ECOSYSTEM.find(e => (e.addr || []).includes(a))?.name || KNOWN[a] || null;
+  if (fees.recipient) fees.label = label(fees.recipient);
+  if (fees.owner) fees.ownerLabel = label(fees.owner);
+  (fees.shares || []).forEach(s => { s.label = label(s.address); });
+  if (fees.shares) fees.devPct = fees.shares.filter(s => s.address === dev).reduce((t, s) => t + s.pct, 0);
+  return fees;
 }
 
 // X: the official API (paid per read) when X_BEARER_TOKEN is set — profile + pinned post + latest posts.
@@ -570,11 +795,11 @@ async function xOfficial(handle){
   const out = {
     handle: d.username, followers: d.public_metrics?.followers_count, posts: d.public_metrics?.tweet_count, joined: d.created_at, bio: d.description,
     website: d.entities?.url?.urls?.[0]?.expanded_url || null, verified: d.verified_type || null,
-    pinned: pinned ? { text: pinned.text, at: pinned.created_at } : null, recentPosts: [], source: "X API",
+    pinned: pinned ? { id: pinned.id, text: pinned.text, at: pinned.created_at, replies: pinned.public_metrics?.reply_count } : null, recentPosts: [], source: "X API",
   };
   try {
     const t = await req(`https://api.x.com/2/users/${d.id}/tweets?max_results=${n}&exclude=retweets,replies&tweet.fields=created_at,public_metrics`, { headers: H, ms: 7000 });
-    out.recentPosts = (t?.data || []).map(p => ({ at: p.created_at, text: p.text.slice(0, 400), likes: p.public_metrics?.like_count, reposts: p.public_metrics?.retweet_count, views: p.public_metrics?.impression_count }));
+    out.recentPosts = (t?.data || []).map(p => ({ id: p.id, replies: p.public_metrics?.reply_count, at: p.created_at, text: p.text.slice(0, 400), likes: p.public_metrics?.like_count, reposts: p.public_metrics?.retweet_count, views: p.public_metrics?.impression_count }));
   } catch {}
   return out;
 }
@@ -592,6 +817,48 @@ async function xProfile(handle){
   return v;
 }
 
+// An X post the user wants checked: its text, author and links.
+async function readTweet(id){
+  const tok = xToken();
+  if (tok){
+    try {
+      const j = await req(`https://api.x.com/2/tweets/${id}?expansions=author_id&user.fields=username&tweet.fields=created_at,entities,note_tweet,conversation_id`, { headers: { authorization: `Bearer ${tok}` }, ms: 7000 });
+      const d = j?.data;
+      if (d) return { text: d.note_tweet?.text || d.text, handle: j.includes?.users?.[0]?.username, at: d.created_at, conversationId: d.conversation_id || null,
+        links: (d.entities?.urls || []).map(u => u.expanded_url).filter(u => u && !/(^https?:\/\/)?(www\.)?(x|twitter)\.com\//i.test(u)) };
+    } catch (e) { console.log("[pruf] X post via API failed:", e?.message || e); }
+  }
+  const j = await req(`https://api.fxtwitter.com/status/${id}`, { ms: 7000 });
+  const t = j?.tweet;
+  if (!t) return {};
+  return { text: t.text, handle: t.author?.screen_name, at: t.created_at,
+    links: [...String(t.text || "").matchAll(/https?:\/\/[^\s]+/g)].map(m => m[0]).filter(u => !/(x|twitter)\.com\/|t\.co\//i.test(u)) };
+}
+
+// What the trench answers under a post. X recent search (last 7 days), paid per post read: X_MAX_REPLIES (default 15, 0 = off).
+async function xReplies(conversationId, teamHandle){
+  const tok = xToken(); const n = Number(process.env.X_MAX_REPLIES ?? 15);
+  if (!tok || !conversationId || !(n > 0)) return null;
+  const q = encodeURIComponent(`conversation_id:${conversationId} -is:retweet`);
+  const j = await req(`https://api.x.com/2/tweets/search/recent?query=${q}&max_results=${Math.min(100, Math.max(10, n))}&tweet.fields=author_id,created_at,public_metrics&expansions=author_id&user.fields=username,public_metrics`, { headers: { authorization: `Bearer ${tok}` }, ms: 7000 });
+  const users = Object.fromEntries((j?.includes?.users || []).map(u => [u.id, u]));
+  const all = (j?.data || []).filter(t => t.id !== conversationId).map(t => {
+    const u = users[t.author_id] || {};
+    return { by: u.username || "?", followers: u.public_metrics?.followers_count ?? null, likes: t.public_metrics?.like_count || 0,
+      team: !!teamHandle && u.username?.toLowerCase() === teamHandle.toLowerCase(), text: String(t.text).replace(/^(@\w+\s+)+/, "").slice(0, 280) };
+  });
+  // Drop "gm", emoji-only and link-only replies: they say nothing.
+  const said = all.filter(r => r.text.replace(/https?:\/\/\S+/g, " ").replace(/[^\p{L}\p{N}$]+/gu, " ").trim().split(" ").filter(Boolean).length >= 3);
+  said.sort((a, b) => b.likes - a.likes || (b.followers || 0) - (a.followers || 0));
+  return { conversationId, read: all.length, replies: said.slice(0, n) };
+}
+// No post given? Take the project's most-discussed post from the last 6 days (older ones are outside X's search window).
+function busiestPost(x){
+  const fresh = [x?.pinned, ...(x?.recentPosts || [])].filter(p => p?.id && p.at && Date.now() - Date.parse(p.at) < 6 * 864e5);
+  fresh.sort((a, b) => (b.replies || 0) - (a.replies || 0));
+  return fresh[0]?.replies >= 3 ? fresh[0] : null;
+}
+
 async function domainAge(url){
   const domain = new URL(url).hostname.replace(/^www\./, "").split(".").slice(-2).join(".");
   const j = await req(`https://rdap.org/domain/${domain}`, { headers: { accept: "application/rdap+json" } });
@@ -603,7 +870,7 @@ function tokenBasics(f){
   const d = f.market;
   if (d){
     c.push({ label: "Trading on", value: d.venues.map(x => VENUES[x] || x).join(", "), tone: "info" });
-    if (isFinite(d.createdAt)) c.push({ label: "Token age", value: ago(d.createdAt), tone: (Date.now() - d.createdAt) / 864e5 < 3 ? "warn" : "info" });
+    if (isFinite(d.createdAt)) c.push({ label: "Token age", value: ago(d.createdAt), tone: "info" });
     c.push({ label: "Liquidity", value: usd(d.liquidityUsd), tone: d.liquidityUsd < 10000 ? "warn" : "good" });
     if (d.marketCap) c.push({ label: "Market cap", value: usd(d.marketCap), tone: "info" });
   }
@@ -616,8 +883,35 @@ function tokenBasics(f){
     if (m.top10Pct != null) c.push({ label: "Top 10 holders", value: pct(m.top10Pct) + " (incl. pools)", tone: m.top10Pct > 50 ? "bad" : m.top10Pct > 30 ? "warn" : "good" });
   }
   if (f.domain?.registered) c.push({ label: "Domain registered", value: ago(Date.parse(f.domain.registered)) + " ago", tone: (Date.now() - Date.parse(f.domain.registered)) / 864e5 < 30 ? "warn" : "info" });
-  if (f.x) c.push({ label: "X account", value: `@${f.x.handle} · ${Number(f.x.followers || 0).toLocaleString("en")} followers` + (f.x.joined ? ` · ${ago(Date.parse(f.x.joined))} old` : ""), tone: f.x.joined && (Date.now() - Date.parse(f.x.joined)) / 864e5 < 30 ? "warn" : "info" });
+  if (f.x) c.push({ label: "X account", value: `@${f.x.handle} · ${Number(f.x.followers || 0).toLocaleString("en")} followers` + (f.x.joined ? ` · ${ago(Date.parse(f.x.joined))} old` : ""), tone: "info" });
   return c;
+}
+
+// Where the creator fees go, as a card.
+function feesCard(fe){
+  if (!fe || !fe.venue) return null;
+  const who = (a, l) => l || short(a);
+  const src = `Read on-chain from the ${fe.venue} ${fe.venue === "PumpSwap" ? "pool" : "bonding curve"}`;
+  let title, tone = "info"; const lines = [];
+  if (fe.kind === "holders"){ title = "Creator fees → holders"; tone = "good"; lines.push("Holder-rewards coin: pump.fun pays the fees to holders, no creator wallet"); }
+  else if (fe.kind === "none"){ title = "No creator-fee recipient set"; }
+  else if (fe.kind === "wallet"){
+    title = fe.label === "dev wallet" ? "Creator fees → the dev wallet" : `Creator fees → ${fe.label || (fe.devKnown ? "another wallet, not the dev" : "this wallet")}`;
+    if (!fe.label) tone = "warn";
+    lines.push(`${(fe.sol ?? 0).toFixed(2)} SOL in it`);
+  }
+  else if (fe.kind === "split"){
+    title = `Creator fees split ${fe.shares.length} way${fe.shares.length > 1 ? "s" : ""}`;
+    fe.shares.slice(0, 5).forEach(x => lines.push(`${x.pct}% → ${who(x.address, x.label)}`));
+    if (fe.shares.length > 5) lines.push(`+${fe.shares.length - 5} more`);
+    lines.push(fe.locked ? "Split is locked forever" : "Admin can still change the split once");
+    if (fe.active === false) lines.push("Sharing is paused");
+    tone = fe.devPct >= 50 ? "warn" : "good";
+  }
+  else { title = "Creator fees → a program-controlled account"; if (fe.owner) lines.push(`Owned by ${who(fe.owner, fe.ownerLabel)}`); tone = "warn"; }
+  if (fe.cashback) lines.push("Cashback coin: part of the fees goes back to traders");
+  lines.push(src);
+  return { address: fe.recipient, title, lines, tone };
 }
 
 // What PRUF found, in a shape the page can render without Claude.
@@ -645,20 +939,43 @@ function techSummary(f){
   const progLabel = L.launchProgram && !isSol(L.launchProgram) ? L.launchProgram.replace(/ program$/, "") : null;
   const via = L.launchpad?.name ? L.launchpad.name + (progLabel && !progLabel.toLowerCase().includes(L.launchpad.name.toLowerCase()) ? ` (on ${progLabel})` : "") : (progLabel || L.launchProgram);
   const launch = via ? { via, created: L.createdAt } : null;
+  const supply = f.mint?.supply || null;
+  const tr = d?.trades, fu = d?.funding, lb = L.launchBlock;
+  const soldShare = tr?.bought > 0 ? Math.min(1, tr.sold / tr.bought) : null;
   const devCard = d ? {
     address: d.address,
     lines: [
+      tr && tr.bought > 0 ? (soldShare >= 0.97 ? "Sold their whole bag" : soldShare > 0.02 ? `Sold ${Math.round(soldShare * 100)}% of their bag` : "Hasn't sold") + (supply ? ` · bought ${pct((tr.bought / supply) * 100)} of supply` : "") : null,
+      tr?.moved > 0 && supply ? `Moved ${pct((tr.moved / supply) * 100)} of supply to ${tr.movedTo} other wallet${tr.movedTo === 1 ? "" : "s"}` : null,
+      fu ? (fu.label ? `Funded from ${fu.label} (${fu.sol} SOL)` : fu.funderLaunched ? `Funded by ${short(fu.from)}, a wallet that launched ${fu.funderLaunched} coin${fu.funderLaunched === 1 ? "" : "s"}` : fu.funderTxs === "1000+" ? `Funded by a high-volume wallet ${short(fu.from)} (exchange or bot)` : `Funded by ${short(fu.from)} (${fu.sol} SOL)`) : null,
       d.holdsPct != null ? `Holds ${pct(d.holdsPct)} of supply` : null,
       d.sol != null ? `${d.sol.toFixed(2)} SOL in wallet` : null,
       d.txCount != null ? `${d.txCount} tx${d.txCount === 1 ? "" : "s"}` + (d.oldestTxInSample ? `, active since ${ago(Date.parse(d.oldestTxInSample))} ago` : "") : null,
       d.topSolRecipients?.length ? `Sends most SOL to ${short(d.topSolRecipients[0].label || d.topSolRecipients[0].to)}` : null,
       d.feeOrClaimTxs?.length ? `${d.feeOrClaimTxs.length} fee/claim txs recently` : null,
+      d.otherCoins ? (d.otherCoins.count ? `Launched ${d.otherCoins.count} other coin${d.otherCoins.count > 1 ? "s" : ""} before · ${d.otherCoins.graduated} graduated · ${d.otherCoins.stillTrading} still trading` + (d.otherCoins.best?.mc > 50000 ? ` · best: $${d.otherCoins.best.symbol} ${d.otherCoins.best.ath ? "peaked at" : "at"} ${usd(d.otherCoins.best.mc)}` : "") : "First coin from this wallet") : null,
     ].filter(Boolean),
     tone: d.holdsPct > 10 ? "bad" : d.holdsPct > 3 ? "warn" : "good",
   } : null;
   if (d?.holdsPct > 10) flags.push({ tone: "bad", text: `Dev wallet holds ${pct(d.holdsPct)} of supply` });
+  if (tr?.moved > 0 && supply && tr.moved / supply > 0.01) flags.push({ tone: "bad", text: `Dev moved ${pct((tr.moved / supply) * 100)} of supply to ${tr.movedTo} other wallet${tr.movedTo === 1 ? "" : "s"} — supply hidden from the dev wallet` });
+  if (soldShare >= 0.97) flags.push({ tone: "warn", text: "Dev already sold their whole bag" });
+  if (fu?.funderLaunched >= 3) flags.push({ tone: "warn", text: `Dev wallet was funded by a wallet that launched ${fu.funderLaunched} coins — likely the same dev` });
+  if (lb?.otherPct >= 10) flags.push({ tone: lb.stillHoldPct >= 5 ? "bad" : "warn", text: `${lb.wallets} wallet${lb.wallets === 1 ? "" : "s"} bought ${pct(lb.otherPct)} in the launch block (bundle)` + (lb.stillHoldPct != null ? `, still holding ${pct(lb.stillHoldPct)}` : "") });
+  const blockCard = lb ? {
+    title: "Launch block",
+    lines: [
+      lb.devPct ? `Dev bought ${pct(lb.devPct)} at creation` : "Dev didn't buy at creation",
+      lb.wallets ? `${lb.wallets} other wallet${lb.wallets === 1 ? "" : "s"} bought ${pct(lb.otherPct || 0)} in the same block` : "No other wallet bought in the launch block",
+      lb.stillHoldPct != null ? `Those wallets still hold ${pct(lb.stillHoldPct)}` : null,
+    ].filter(Boolean),
+    tone: lb.otherPct >= 10 ? (lb.stillHoldPct >= 5 ? "bad" : "warn") : "good",
+  } : null;
+  // Launching many coins isn't bad by itself — what matters is whether any of them ever ran.
+  const oc = d?.otherCoins;
+  if (oc?.count >= 5 && !oc.graduated && !(oc.best?.mc > 100000)) flags.push({ tone: "warn", text: `Dev launched ${oc.count} coins before and none took off` });
   return {
-    launch, dev: devCard,
+    launch, dev: devCard, fees: feesCard(f.fees), block: blockCard,
     builder: s.builder || null,
     stack: [...(s.libraries || []), ...(s.services || [])],
     signsTransactions: !!s.signsTransactions,
@@ -679,21 +996,24 @@ function buildPrompt(f){
     token_market: f.market, token_mint: f.mint,
     token_metadata: f.meta ? { website: f.meta.website, twitter: f.meta.twitter, telegram: f.meta.telegram, created_on: f.meta.createdOn, update_authority: f.meta.updateAuthority, raw_metadata_json: f.meta.raw } : null,
     launch_and_dev_wallet: f.launch || null, x_profile: f.x ? { ...f.x, pinned: undefined, recentPosts: f.x.recentPosts ? `${f.x.recentPosts.length} posts, text below` : undefined } : null, domain: f.domain,
+    token_site_linkage: f.linkage || "only one of CA / website was given or found",
     offchain_backend_verification: f.backend || "site doesn't call a server of its own",
     market_context_platforms_detected: f.ecosystem?.length ? f.ecosystem : "none detected",
+    creator_fees_onchain: f.fees || "not a pump.fun / PumpSwap token, or couldn't read it",
+    x_replies: f.replies ? { under_post: f.replies.on, read: f.replies.read, replies: f.replies.replies } : "not read",
   };
   const pages = f.pages.map(p => `--- ${p.url} ---\n${p.text}`).join("\n\n");
   return `You are PRUF. Your one job: decide whether the TECHNOLOGY a crypto project promises actually exists and works. Not whether the token is a good investment, not whether it's a rug. The tech.
 
 Method:
-1. From the project's own text, list the concrete tech it promises (a launchpad, a game, a bot, an AI agent, buybacks/burns, staking, a bridge, privacy, its own smart contract/program, an app, revenue sharing…). Ignore pure vibes and memes.
+1. From the project's own text (site, docs, metadata, its X posts), list ONLY the concrete tech it explicitly promises — never invent a promise it didn't make (e.g. don't judge "open source" unless they claim it) (a launchpad, a game, a bot, an AI agent, buybacks/burns, staking, a bridge, privacy, its own smart contract/program, an app, revenue sharing…). Ignore pure vibes and memes.
 2. For each promise, look for EVIDENCE in what PRUF collected:
    - website_code: libraries, services, whether the site can sign transactions, addresses embedded in the code, Math.random() snippets near metrics (fake live numbers), leaked secrets, site builder.
    - onchain_probes: for each address found in the code/docs/GitHub — does it exist, is it a program, when deployed, is it actually used (recent tx count), can the team change it (upgrade authority), does a verified build match public source.
    - github: does the repo contain real code for the promised thing (programs/, contracts, bot code), how many commits/authors, is it a fork or template, does declare_id match a deployed program.
 3. Classify each promise:
    "proven" = PRUF found direct evidence it exists and works (deployed program with real usage, code in the repo that does it, site code that actually calls it).
-   "trust" = it runs off-chain or behind their server, so it can't be confirmed either way (AI agent logic, a backend that pays out).
+   "trust" = the feature's claimed inner workings can't be confirmed from outside (NOT just "it has a server" — see 5e) (AI agent logic, a backend that pays out).
    "busted" = evidence contradicts it (numbers generated by Math.random, program doesn't exist or has zero usage, repo is an empty template, claims 'audited/open source' but nothing public, claims automation but the wallet shows manual or no activity).
    "no_evidence" = promised but PRUF found nothing either way (no program address anywhere, no code, no integration in the site).
 4. Be concrete: every "evidence" field must cite what PRUF found (e.g. "Program 7xK…aB deployed 3 days ago, 200+ txs, upgradeable by team", "Site code has no wallet transaction code", "Math.random() drives the 'live trades' counter").
@@ -705,26 +1025,47 @@ Method:
    - level "closed" or no repo: server logic → "trust".
    Calls to an outside AI model or third-party API are still "trust" for what that model/API does; say so plainly.
    Do NOT flag "nothing on-chain" when the project never claims on-chain parts. Judge only what it promises.
+   A SERVER IS NOT A RED FLAG. Almost every app runs on a server nobody can see (Telegram, Axiom, pump.fun itself). Never use "closed server", "private backend" or "runs on their servers" as a headline, a red flag or the main point of the summary by itself.
+   - The app part: if the site code really calls their API, signs real txs, or the product visibly works, that feature EXISTS → "proven" ("app is live: site calls its own API"). Only the hidden part they brag about (e.g. "fully autonomous AI", "proprietary model", "99% win rate") is "trust".
+   - It only MATTERS when money goes through the server: it holds user funds or keys, signs txs on users' behalf, decides payouts/rewards/fee distribution, or "the AI trades your money". Then say plainly that you're trusting the team with your money — that's a custody point (custody.keys / custody.funds) and can be a red flag.
+   - Pure off-chain features (chat rooms, AI replies, dashboards, games without a prize pool) on a closed server = normal; don't penalize them.
+5f. TOKEN ↔ PROJECT: if token_site_linkage.verified is false, say clearly (headline or first red flag) that nothing proves this token is the project's official token — copycat tickers are common. Judge the site's tech on its own, but never credit it to the token.
+5g. If the project text includes "THE X POST BEING CHECKED", the user pasted that post: judge ITS claims first (first claims in the list) and say in the headline whether the post holds up.
+5h. CREATOR FEES: creator_fees_onchain is read straight from the pump.fun bonding curve / PumpSwap pool account — it is the ground truth for where creator fees go RIGHT NOW. kind: "wallet" (one wallet; label "dev wallet" = the wallet that launched it), "split" (pump.fun fee sharing: shares[] with % each, devPct = dev's cut, locked = can never change again, not locked = admin can still change it once), "holders" (holder-rewards coin: pump.fun itself pays holders), "program" (a program-controlled account, e.g. another platform's vault). Compare it with every fee promise (fees to holders, buybacks, burns, a charity, an @account, a treasury, a game prize pool, "dev takes 0"): recipient matches the promise → proven up to that wallet (what the wallet does next is trust unless its activity shows it); fees land in the dev wallet while they promise something else → busted, unless they explain the dev manually forwards them (then trust); split with a big dev cut while they say "all fees to X" → busted. Use it for custody.fees ("Dev wallet", "Split: dev 40%", "Holders via pump.fun"…).
+5i. X REPLIES: x_replies are what other people answered under the post. They are NOT evidence — they are leads. Look for concrete, repeated accusations (dev sold/rugged before, copied repo/site, fake partnership, product doesn't work, stolen art, bundled supply) and check each one against PRUF's evidence; if PRUF's data backs it, use it. If it's unverified but repeated by several accounts, mention it as "Replies say …, unverified". Ignore shills, bots, "gm", "LFG", price talk. team=true marks the project's own replies — note if the team dodges a direct question. Fill "crowd" with what the replies actually say.
+5j. DEV BEHAVIOUR (launch_and_dev_wallet.dev and .launchBlock) — read it like a trencher:
+   - dev.trades: bought / sold / moved (token amounts, from the dev's last ~100 txs). Dev taking some profit is normal; dev sold the whole bag = they're out, say it. "moved" = tokens sent to other wallets with plain transfers = supply parked in fresh wallets, a classic way to hide a big bag — red flag.
+   - dev.funding: who sent the dev wallet its first SOL. From an exchange (label) = neutral, very common. From a wallet that launched coins itself (funderLaunched) = most likely the same person behind a new wallet; judge it with that wallet's track record. Never call an unlabeled funder bad by itself.
+   - launchBlock: wallets that got the token in the creation block besides the dev = a bundle (the dev or friends sniping their own launch). >10% bundled and still held = dump risk, red flag. Bundle already sold = past, mention lightly. No other buyers = clean launch, green flag.
+   These are about the coin, not the tech: put them in red/green flags and "plain", never as claims, unless the project promised something they contradict (e.g. "fair launch, no bundles", "dev won't sell", "team tokens locked").
 5d. X POSTS: the project's latest posts and pinned post are included in the project's text (when available). Promises made there count. Note if the account is silent, only shills, or its posts contradict the site.
 5. Common things that look like tech but aren't the project's own: using pump.fun / Meteora / Jupiter is real but it's someone else's tech; say so.
 6. Do NOT pad the report with token-safety items (mint authority, holders, liquidity). Mention them only if a promise depends on them.
 7. Never call a project a "scam". Report evidence.
+8. Write about the PROJECT, never about PRUF's own plumbing. Never mention libraries, polyfills or third-party repos (react, core-js, wallet-adapter…) as if they mattered, never say "PRUF couldn't read X" in the headline/summary/plain, and never list a missing GitHub as a finding unless they claim to be open source. When something isn't published, say it as the project's gap ("No program address published"), not as a search failure. If the app clearly works (real wallet signing, real API calls, real on-chain txs), say so first and give it credit as a claim.
 
-Scoring: "score" 0-100 = share of the promised core tech that is proven. "verdict": "proven" (core tech exists and is used), "trust" (some real parts, core depends on their servers), "busted" (key promises contradicted by evidence), "no_evidence" (promises with nothing behind them, or almost nothing to check).
+TRENCH CONTEXT — think like someone who lives in the Solana trenches:
+- Day-1 projects are normal. NEVER red-flag age by itself (new domain, new X account, new repo, new token), low follower counts, few commits, a site built with Lovable/v0/Bolt, or building on pump.fun/Meteora/Raydium/Bags. Mention these only as neutral context.
+- Red flags that actually cost people money: the site asks wallets to sign transactions for a program nobody can verify; the team can change a program that holds or moves user funds; the dev holds a big share of supply; the dev is a serial launcher whose coins all died; the token isn't provably the project's own (copycat); fake on-screen numbers; promised fees/buybacks/rewards with no wallet or program behind them; leaked keys.
+- A dev who launched many coins is NOT bad by itself — judge the track record: earlier coins that graduated or ran hard (high peak market cap) are a strong green flag; many coins that never left the bonding curve mean the dev is exposed to the "launch and leave" pattern, mention it as a caution, not as proof of a scam.
 
-WRITING STYLE — this is read by degens in 5-10 seconds, on a phone, mid-trade:
-- Short, blunt, plain words. Trench slang is fine (dev, CA, rug, larp, vapor, ser) but no jargon a normal degen wouldn't know. No "furthermore", no hedging paragraphs.
+Scoring: PRUF computes the score from your claim statuses — just classify each claim honestly. "verdict": "proven" (core tech exists and is used), "trust" (some real parts, core depends on their servers), "busted" (key promises contradicted by evidence), "no_evidence" (promises with nothing behind them, or almost nothing to check). Put "score":0 in the JSON.
+
+WRITING STYLE — read by degens in 5-10 seconds, on a phone, mid-trade:
+- Short, blunt, trench language (CA, dev, on-chain, rug, larp, cap, ser, bonding curve, graduated are all fine). No corporate words, no "furthermore", no hedging paragraphs.
 - Lead with the punchline. Numbers and facts over adjectives ("0 txs in 3 days", not "very low activity").
 - Every field has a hard word limit. Respect it. Cut, don't cram.
 
 Reply with ONLY one JSON object, English only:
 {"verdict":"trust","score":40,
+ "plain":"<bottom line, max 25 words, trench voice: what this really is today and the one thing that can burn you>",
  "headline":"<max 8 words, the punchline. e.g. 'AI agent is a server you can't see'>",
  "summary":"<TL;DR, max 25 words, 1-2 short sentences: what's real, what isn't>",
  "claims":[{"claim":"<the promise, max 6 words>","status":"proven|trust|busted|no_evidence","evidence":"<what PRUF found, ONE sentence, max 16 words, cite the fact>","how_to_check":"<max 12 words, or 'Can't check from outside'>"}],
  "custody":{"keys":"<max 6 words, e.g. 'Team holds them'>","fees":"<max 6 words>","funds":"<max 6 words>"},
  "red_flags":["<max 6 words each, max 4 items>"],
  "green_flags":["<max 6 words each, max 4 items>"],
+ "crowd":"<max 18 words: what the replies say, trench voice, e.g. 'Replies call out copied repo, team ignores it' — empty string if no replies were read>",
  "post":"<tweet under 240 chars, punchy degen voice, no hashtags/emojis, name the ticker if known>"}
 3 to 6 claims, most important first.
 
@@ -733,6 +1074,17 @@ ${JSON.stringify(evidence, null, 1).slice(0, 60000)}
 
 PROJECT'S OWN TEXT (site and docs):
 ${pages || "(no website or docs text could be read)"}`;
+}
+
+// The score is computed, not guessed: Real 100, Trust me bro 50 (can't be checked ≠ fake), Vapor 10, Cap 0.
+// The first claims are the core promises, so they weigh a bit more.
+const CLAIM_PTS = { proven: 100, trust: 50, no_evidence: 10, busted: 0 };
+function scoreReport(r){
+  const cl = Array.isArray(r?.claims) ? r.claims.filter(c => c && c.status in CLAIM_PTS) : [];
+  if (!cl.length) return r;
+  let sum = 0, w = 0;
+  cl.forEach((c, i) => { const k = 1 / (1 + 0.2 * i); sum += CLAIM_PTS[c.status] * k; w += k; });
+  return { ...r, score: Math.round(sum / w) };
 }
 
 function parseJSON(text){
@@ -771,11 +1123,36 @@ async function run(input, send){
   const started = Date.now();
   const left = () => 52000 - (Date.now() - started); // Netlify stops functions at 60s
   const log = m => console.log(`[pruf] ${((Date.now() - started) / 1000).toFixed(1)}s ${m}`);
-  const ca0 = (input.ca || "").trim();
+  // An X post link? Then that post's claims are what we check.
+  let tweet = null;
+  const tm = String(input.website || "").match(/(?:x|twitter)\.com\/([A-Za-z0-9_]{1,15})\/status\/(\d+)/i);
+  if (tm){ tweet = { id: tm[2], handle: tm[1] }; input = { ...input, website: "" }; }
+  let ca0 = (input.ca || "").trim();
   let site = safeUrl(input.website);
-  let handle = xHandle(input.x);
+  let handle = xHandle(input.x) || tweet?.handle || null;
+
+  // Same thing checked in the last 6h? Serve the saved report (instant, costs nothing).
+  const store = reportStore();
+  const cacheKey = tweet ? `tweet:${tweet.id}` : ca0 || (site ? new URL(site).hostname.replace(/^www\./, "") : handle || "");
+  const id = reportId(cacheKey);
+  if (store && cacheKey && !input.fresh){
+    try {
+      const c = await store.get(`r/${id}`, { type: "json" });
+      if (c && Date.now() - c.at < 6 * 3600e3){ send({ t: "facts", data: c.facts }); send({ t: "report", data: c.report }); send({ t: "saved", id, cached: true, at: c.at }); return; }
+    } catch {}
+  }
+
+  let repliesP = null;
+  if (tweet){
+    send({ t: "step", msg: "Reading the X post" });
+    try { Object.assign(tweet, await readTweet(tweet.id)); } catch {}
+    repliesP = xReplies(tweet.conversationId || tweet.id, tweet.handle).then(r => r && { ...r, on: `x.com/${tweet.handle}/status/${tweet.id}` }).catch(e => { log("replies failed: " + (e?.message || e)); return null; });
+    if (tweet.handle) handle = tweet.handle;
+    if (!site && tweet.links?.length) site = safeUrl(tweet.links[0]);
+    if (!ca0){ const m = String(tweet.text || "").match(/(?<![A-Za-z0-9])([1-9A-HJ-NP-Za-km-z]{32,44})(?![A-Za-z0-9])/); if (m && looksLikeKey(m[1])) ca0 = m[1]; }
+  }
   if (ca0 && !isSol(ca0) && !isEvm(ca0)) throw new Error("That doesn't look like a Solana or EVM contract address.");
-  if (!ca0 && !site && !handle) throw new Error("Paste a contract address or a website.");
+  if (!ca0 && !site && !handle) throw new Error("Paste a contract address, a website or an X post.");
 
   const f = { ca: null, chain: null, market: null, mint: null, x: null, github: null, domain: null, site: null, probes: [], docAddresses: [], pages: [], sources: [], misses: [] };
 
@@ -796,19 +1173,23 @@ async function run(input, send){
       f.meta = m;
       if (!site && m.website) site = m.website;
       if (!handle && m.twitter) handle = xHandle(m.twitter);
+      if (m.metaFailed && !m.website && !m.twitter) f.misses.push("Couldn't read the token's metadata file (IPFS too slow) — it may list a site and X that PRUF didn't see");
       if (m.description) f.pages.push({ url: "token metadata (written by the creator at launch)", text: m.description.slice(0, 3000) });
       if (m.from.includes("pump.fun")) f.sources.push({ label: "pump.fun", url: `https://pump.fun/coin/${addr}` });
     }
     return true;
   }
 
-  if (ca0){ send({ t: "step", msg: "Finding the project" }); await loadToken(ca0); }
+  if (tweet?.text) f.pages.push({ url: `x.com/${tweet.handle}/status/${tweet.id}`, text: `THE X POST BEING CHECKED (${tweet.at || ""}):\n${tweet.text}` });
+  if (ca0){ send({ t: "step", msg: "Pulling the CA" }); await loadToken(ca0); }
+  // No site yet? Use the one on their X profile.
+  if (!site && handle){ try { const xp = await xProfile(handle); if (xp?.website) site = safeUrl(xp.website); } catch {} }
   if (!site) f.misses.push("No website found");
 
   // Website: rendered text + raw code, in parallel.
   let links = [];
   if (site){
-    send({ t: "step", msg: "Reading the website and its code" });
+    send({ t: "step", msg: "Reading the site + its JS" });
     const [page, code, dom] = await Promise.allSettled([readPage(site), siteForensics(site), domainAge(site)]);
     if (page.status === "fulfilled"){
       f.pages.push({ url: site, text: page.value.slice(0, 20000) });
@@ -820,7 +1201,7 @@ async function run(input, send){
     if (!handle) handle = xHandle(links.find(l => /(?:x|twitter)\.com\/[A-Za-z0-9_]{1,15}\/?$/i.test(l)));
 
     if (!f.ca){
-      const text = f.pages[0]?.text || "";
+      const text = f.pages.filter(p => p.url === site || p.url.startsWith("x.com/")).map(p => p.text).join("\n");
       const cands = [...new Set([...text.matchAll(/(?<![A-Za-z0-9])(0x[a-fA-F0-9]{40}|[1-9A-HJ-NP-Za-km-z]{32,44})(?![A-Za-z0-9])/g)].map(m => m[1]))]
         .filter(c => !KNOWN[c] && (isEvm(c) || looksLikeKey(c)))
         .sort((a, b) => (/pump$|bonk$/.test(b) ? 1 : 0) - (/pump$|bonk$/.test(a) ? 1 : 0)).slice(0, 3);
@@ -844,12 +1225,15 @@ async function run(input, send){
   }
 
   // GitHub + X in parallel.
-  send({ t: "step", msg: "Reading GitHub and X" });
-  const [ghr, xr, ldr] = await Promise.allSettled([
+  send({ t: "step", msg: "Checking GitHub, X & dev wallet" });
+  const [ghr, xr, ldr, fer] = await Promise.allSettled([
     githubDeep([...(f.site?.deployedCommit?.repo ? [`https://github.com/${f.site.deployedCommit.repo}`] : []), ...(f.site?.githubLinks || []), ...links]),
     handle ? xProfile(handle) : Promise.resolve(null),
     f.ca && isSol(f.ca) ? launchAndDev(f.ca, f.meta, f.mint?.supply) : Promise.resolve(null),
+    f.ca && isSol(f.ca) ? creatorFees(f.ca, f.market) : Promise.resolve(null),
   ]);
+  if (fer.status === "fulfilled" && fer.value) f.fees = fer.value;
+  else if (fer.status === "rejected") log("fees read failed: " + (fer.reason?.message || fer.reason));
   if (ldr.status === "fulfilled" && ldr.value){
     f.launch = ldr.value;
     if (f.launch.dev?.address) f.sources.push({ label: "Dev wallet", url: `https://solscan.io/account/${f.launch.dev.address}` });
@@ -859,6 +1243,12 @@ async function run(input, send){
   if (f.backend?.deployedCommitInRepo) f.sources.push({ label: "Live commit", url: `https://github.com/${f.backend.repo}/commit/${f.site.deployedCommit.sha}` });
   if (xr.status === "fulfilled" && xr.value){ f.x = xr.value; f.sources.push({ label: "@" + xr.value.handle, url: `https://x.com/${xr.value.handle}` }); }
   else if (handle) f.misses.push(`Couldn't read @${handle} on X`);
+  if (f.fees) labelFees(f.fees, f.launch?.dev?.address || f.meta?.creator);
+  // Replies: under the checked post, or under the project's busiest recent post.
+  if (!repliesP && f.x){
+    const bp = busiestPost(f.x);
+    if (bp) repliesP = xReplies(bp.id, f.x.handle).then(r => r && { ...r, on: `x.com/${f.x.handle}/status/${bp.id}` }).catch(e => { log("replies failed: " + (e?.message || e)); return null; });
+  }
 
   // X posts are the project's own words too: feed them to the promise-matching.
   if (f.x?.pinned || f.x?.recentPosts?.length){
@@ -886,12 +1276,28 @@ async function run(input, send){
     }
   }
 
+  // Does this token really belong to this site? (Copycat tokens are everywhere.)
+  if (f.ca && site){
+    const host = u => { try { return new URL(safeUrl(u)).hostname.replace(/^www\./, ""); } catch { return null; } };
+    const siteHost = host(site);
+    const tokenSites = [f.meta?.website, ...(f.market?.websites || [])].map(host).filter(Boolean);
+    const seen = f.pages.map(p => p.text).join("\n") + " " + (f.site?.solAddresses || []).join(" ");
+    f.linkage = { site: siteHost, tokenLinksTo: tokenSites[0] || null, tokenLinksToSite: tokenSites.includes(siteHost), siteShowsThisCA: seen.includes(f.ca) };
+    f.linkage.verified = f.linkage.tokenLinksToSite || f.linkage.siteShowsThisCA;
+  }
+  if (repliesP){ f.replies = await repliesP; if (f.replies) f.sources.push({ label: "Replies", url: "https://" + f.replies.on }); }
   f.tech = techSummary(f);
-  send({ t: "facts", data: {
+  if (f.linkage && !f.linkage.verified) f.tech.flags.unshift({ tone: "bad", text: f.linkage.tokenLinksTo
+    ? `This token links to ${f.linkage.tokenLinksTo}, not ${f.linkage.site} — it may not be this project's token`
+    : `No proof this token belongs to ${f.linkage.site}: the site doesn't show this CA and the token doesn't link the site` });
+  const factsData = {
     ca: f.ca, chain: f.chain,
     token: f.market ? { name: f.market.name, symbol: f.market.symbol, image: f.market.image } : null,
     website: site, x: f.x?.handle || handle, tech: f.tech, platforms: (f.ecosystem || []).map(e => e.name), basics: tokenBasics(f), sources: f.sources, misses: f.misses,
-  } });
+    tweet: tweet?.text ? { handle: tweet.handle, id: tweet.id, text: tweet.text.slice(0, 400) } : null,
+    replies: f.replies ? { read: f.replies.read, kept: f.replies.replies.length, on: f.replies.on } : null,
+  };
+  send({ t: "facts", data: factsData });
 
   if (!f.pages.length && !f.site && !f.market) throw new Error("Couldn't find anything to check. Try the website instead of the CA, or the other way round.");
 
@@ -899,8 +1305,22 @@ async function run(input, send){
   if (left() < 10000) throw new Error("This project's sites were too slow to read. Try again in a moment.");
   const model = left() < 30000 ? FAST_MODEL : MODEL;
   log(`asking ${model}, ${Math.round(left() / 1000)}s left`);
-  try { send({ t: "report", data: await askClaude(buildPrompt(f), left() - 1000, model) }); log("done"); }
+  let report;
+  try { report = scoreReport(await askClaude(buildPrompt(f), left() - 1000, model)); send({ t: "report", data: report }); log("done"); }
   catch (e) { if (e?.name === "TimeoutError") throw new Error("The analysis ran out of time. Try again."); throw e; }
+
+  // Save it: share link + "recently checked".
+  if (store && cacheKey){
+    try {
+      const at = Date.now();
+      await store.setJSON(`r/${id}`, { at, key: cacheKey, facts: factsData, report });
+      const title = factsData.token ? `${factsData.token.name} ($${factsData.token.symbol})` : factsData.website ? new URL(factsData.website).hostname : tweet ? `@${tweet.handle} post` : cacheKey;
+      const list = (await store.get("recent", { type: "json" }).catch(() => null)) || [];
+      const entry = { id, at, title, image: factsData.token?.image || null, verdict: report.verdict, score: report.score, headline: report.headline };
+      await store.setJSON("recent", [entry, ...list.filter(e => e.id !== id)].slice(0, 30));
+      send({ t: "saved", id });
+    } catch (e) { log("save failed: " + (e?.message || e)); }
+  }
 }
 
 export default async (request) => {

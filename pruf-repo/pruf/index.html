@@ -168,7 +168,7 @@ details.how p{margin:6px 0 0;color:var(--ink)}
 .prog a:hover{color:var(--accent)}
 .prog span{font-size:.82rem;color:var(--muted)}
 .prog .tag{align-self:flex-start;font-size:.68rem;font-weight:600;text-transform:uppercase;letter-spacing:.06em}
-.prog.good .tag{color:var(--ok)} .prog.warn .tag{color:var(--warn)} .prog.bad .tag{color:var(--bad)}
+.prog.info .tag{color:var(--ink)} .prog.good .tag{color:var(--ok)} .prog.warn .tag{color:var(--warn)} .prog.bad .tag{color:var(--bad)}
 .chips{display:flex;flex-wrap:wrap;gap:6px}
 .chip{font-size:.78rem;border:1px solid var(--line);border-radius:999px;padding:4px 10px;color:var(--ink)}
 .chip.dim{color:var(--muted)}
@@ -204,6 +204,30 @@ details.basics[open] summary{margin-bottom:12px}
 .post-foot span{font-family:var(--f-mono);font-size:.72rem;color:var(--faint)}
 .post-foot button{padding:7px 14px;font-size:.84rem}
 .note{font-size:.78rem;color:var(--faint);margin:0}
+.log{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px;font-size:.84rem}
+.log li{display:flex;justify-content:space-between;gap:12px;color:var(--muted)}
+.log li .m::before{content:"";display:inline-block;width:14px;margin-right:8px;text-align:center}
+.log li.doing .m::before{content:"";width:10px;height:10px;border-radius:50%;border:2px solid var(--line);border-top-color:var(--accent);animation:spin .8s linear infinite;vertical-align:-1px;margin-right:10px}
+.log li.done .m::before{content:"✓";color:var(--accent)}
+.log li.fail .m::before{content:"✕";color:var(--bad)}
+.log li.final{color:var(--ink);font-weight:600}
+.log .t{font-family:var(--f-mono);font-size:.74rem;color:var(--faint);white-space:nowrap}
+.plain{display:flex;flex-direction:column;gap:4px;border:1px solid var(--line);border-radius:12px;padding:12px 14px}
+.plain b{font-family:var(--f-mono);font-size:.72rem;color:var(--accent);letter-spacing:.06em;text-transform:uppercase}
+.plain p{margin:0;font-size:1rem}
+.plain.crowd b{color:var(--muted)} .plain.crowd p{font-size:.92rem}
+.share-row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.cached-note{margin:0;font-size:.8rem;color:var(--faint);display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.cached-note button{padding:4px 10px;font-size:.78rem}
+.tweet{margin:0;border-left:3px solid var(--accent);background:var(--field);border-radius:0 10px 10px 0;padding:10px 14px}
+.tweet b{font-size:.78rem;color:var(--muted)} .tweet p{margin:4px 0 0;font-size:.9rem;white-space:pre-wrap}
+.recent{display:flex;flex-direction:column}
+.recent-item{display:grid;grid-template-columns:22px minmax(0,1fr) auto auto;gap:10px;align-items:center;padding:9px 4px;border-top:1px solid var(--line);color:var(--ink);text-decoration:none;font-size:.88rem}
+.recent-item:first-child{border-top:0}
+.recent-item:hover .recent-title{color:var(--accent)}
+.recent-title{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.recent-score{font-family:var(--f-mono);font-size:.8rem;color:var(--muted)}
+.recent-ago{font-size:.75rem;color:var(--faint)}
 footer{text-align:center;font-size:.78rem;color:var(--faint);padding-top:8px;line-height:2}
 footer .src{color:var(--muted);text-decoration:none;margin:0 6px;font-family:var(--f-mono);font-size:.72rem}
 footer .src:hover{color:var(--accent)}
@@ -231,6 +255,48 @@ footer .src:hover{color:var(--accent)}
 #code-field .peek{position:absolute;right:8px;top:-34px;width:64px;height:64px;object-fit:contain;pointer-events:none;animation:peekup .5s cubic-bezier(.2,1.3,.4,1) both}
 @keyframes peekup{from{transform:translateY(24px);opacity:0}}
 
+
+/* Prufy skin: round, soft and glossy like the mascot. Icons are our own (sprite at the top of <body>), never system emoji. */
+body{background:radial-gradient(ellipse 70% 420px at 50% -80px,rgba(53,208,127,.10),transparent 70%),var(--bg);background-repeat:no-repeat}
+.card{border-radius:22px;background:linear-gradient(180deg,rgba(255,255,255,.035),rgba(255,255,255,0) 120px),var(--surface);border-color:#262b29;box-shadow:inset 0 1px 0 rgba(255,255,255,.05),0 10px 30px -16px rgba(0,0,0,.7)}
+@media (max-width:520px){.card{border-radius:20px}}
+input{border-radius:14px}
+.one input{border-radius:16px;padding:15px 18px}
+button{border-radius:999px}
+button.primary{background:var(--accent);border-color:var(--accent);color:#06140c;font-weight:700;padding:12px 26px;box-shadow:inset 0 1px 0 rgba(255,255,255,.45),inset 0 -2px 0 rgba(0,0,0,.18),0 6px 18px -6px rgba(53,208,127,.55);transition:transform .12s,box-shadow .2s,filter .15s}
+button.primary:hover{filter:brightness(1.06);transform:translateY(-1px);box-shadow:inset 0 1px 0 rgba(255,255,255,.45),inset 0 -2px 0 rgba(0,0,0,.18),0 10px 24px -6px rgba(53,208,127,.6)}
+button.primary:active{transform:translateY(0) scale(.98)}
+.ic{width:1.05em;height:1.05em;flex:none;fill:none;stroke:currentColor;stroke-width:2.3;stroke-linecap:round;stroke-linejoin:round;vertical-align:-.15em}
+.bub{--bc:var(--muted);display:inline-grid;place-items:center;width:30px;height:30px;border-radius:50%;flex:none;color:var(--bc);background:color-mix(in srgb,var(--bc) 14%,transparent);box-shadow:inset 0 1px 0 rgba(255,255,255,.06)}
+.bub .ic{width:17px;height:17px}
+.bub.acc{--bc:var(--accent)} .bub.ok{--bc:var(--ok)} .bub.bad{--bc:var(--bad)} .bub.warn{--bc:var(--warn)}
+.sec h3,details.basics summary{font-family:var(--f-title);font-size:1.12rem;font-weight:700;color:var(--ink);text-transform:none;letter-spacing:0;gap:10px;line-height:1.2}
+.sec h3 .n{font-family:var(--f-title);font-size:.8rem;font-weight:700;color:var(--muted);background:var(--field);border-radius:999px;padding:1px 8px}
+.chip{display:inline-flex;align-items:center;gap:6px;background:var(--field);border-color:transparent;padding:5px 11px}
+.chip .ic{color:var(--muted)}
+.chip.ok{background:var(--ok-bg);border-color:transparent} .chip.ok .ic{color:var(--ok)}
+.prog{border-radius:16px;padding:14px}
+.prog .tag{display:inline-flex;align-items:center;gap:6px;font-family:var(--f-title);font-size:.92rem;font-weight:700;text-transform:none;letter-spacing:0}
+.ctrl span{display:inline-flex;align-items:center;gap:6px;padding:8px 14px}
+.ctrl span .ic{color:var(--accent)}
+.plain,.tldr,.pending,.post,.custody div,.chk{border-radius:16px}
+.plain b,.tldr b{font-family:var(--f-title);font-size:.88rem;font-weight:700;letter-spacing:0;text-transform:none}
+.plain{background:linear-gradient(180deg,var(--accent-soft),transparent);border-color:color-mix(in srgb,var(--accent) 25%,var(--line))}
+.plain.crowd{background:none;border-color:var(--line)}
+.pill,.verdict,.tally span{font-family:var(--f-title);font-weight:700;letter-spacing:.01em}
+.pill{font-size:.8rem;padding:3px 10px 2px}
+.tally span{font-size:.86rem;padding:4px 11px 3px}
+.verdict{font-size:.88rem}
+.legend{border-radius:16px;border-color:transparent}
+.legend:has(.p-proven){background:color-mix(in srgb,var(--ok) 7%,transparent)}
+.legend:has(.p-trust){background:color-mix(in srgb,var(--warn) 7%,transparent)}
+.legend:has(.p-busted){background:color-mix(in srgb,var(--bad) 7%,transparent)}
+.legend:has(.p-no_evidence){background:color-mix(in srgb,var(--info) 8%,transparent)}
+.alert{border-radius:14px}
+.links a{background:var(--field);border-color:transparent}
+.badge{font-family:var(--f-title);font-weight:700;font-size:.74rem;color:var(--accent);background:var(--accent-soft);border-color:transparent;padding:3px 11px 2px}
+.tweet{border-radius:0 14px 14px 0}
+
 /* Intro: Prufy looks around, investigating (first visit only) */
 #intro{position:fixed;inset:0;z-index:100;background:#080808;display:grid;place-items:center;cursor:pointer;transition:opacity .45s ease,visibility .45s}
 #intro.out{opacity:0;visibility:hidden}
@@ -244,6 +310,25 @@ footer .src:hover{color:var(--accent)}
 </style>
 </head>
 <body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="i-eyes" viewBox="0 0 24 24"><circle cx="7.5" cy="12" r="4.6"/><circle cx="16.5" cy="12" r="4.6"/><circle cx="8.6" cy="12.4" r="1.5" fill="currentColor" stroke="none"/><circle cx="17.6" cy="12.4" r="1.5" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8.5" r="3.8"/><path d="M5 20c1.2-3.6 4-5.5 7-5.5s5.8 1.9 7 5.5"/></symbol>
+    <symbol id="i-coins" viewBox="0 0 24 24"><ellipse cx="12" cy="6.5" rx="6.5" ry="2.7"/><path d="M5.5 6.5v5c0 1.5 2.9 2.7 6.5 2.7s6.5-1.2 6.5-2.7v-5"/><path d="M5.5 11.5v5c0 1.5 2.9 2.7 6.5 2.7s6.5-1.2 6.5-2.7v-5"/></symbol>
+    <symbol id="i-apps" viewBox="0 0 24 24"><rect x="4" y="4" width="7" height="7" rx="2.2"/><rect x="13" y="4" width="7" height="7" rx="2.2"/><rect x="4" y="13" width="7" height="7" rx="2.2"/><rect x="13" y="13" width="7" height="7" rx="3.5"/></symbol>
+    <symbol id="i-chat" viewBox="0 0 24 24"><path d="M7 5h10a3 3 0 0 1 3 3v5a3 3 0 0 1-3 3h-5l-4.5 3.5V16H7a3 3 0 0 1-3-3V8a3 3 0 0 1 3-3z"/></symbol>
+    <symbol id="i-rocket" viewBox="0 0 24 24"><path d="M12 3c3.4 2 5 5.4 5 9l-2.4 3.2H9.4L7 12c0-3.6 1.6-7 5-9z"/><circle cx="12" cy="9.6" r="1.7"/><path d="M9.6 15.6 8.2 20l2.7-1.4M14.4 15.6l1.4 4.4-2.7-1.4"/></symbol>
+    <symbol id="i-key" viewBox="0 0 24 24"><circle cx="8" cy="15" r="4"/><path d="M11 12l8-8M15.5 7.5l2.5 2.5M13.5 9.5l2 2"/></symbol>
+    <symbol id="i-wallet" viewBox="0 0 24 24"><path d="M5 8V7a2.5 2.5 0 0 1 2.5-2.5H16V8"/><rect x="3.5" y="8" width="17" height="11.5" rx="3"/><circle cx="16" cy="13.75" r="1.3" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="i-flag" viewBox="0 0 24 24"><path d="M6 20.5V4.5"/><path d="M6 5h11l-2.2 3.5L17 12H6"/></symbol>
+    <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3.5l7 2.8v5.2c0 4.3-3 7.6-7 9-4-1.4-7-4.7-7-9V6.3z"/><path d="M9 12l2.2 2.2L15.3 10"/></symbol>
+    <symbol id="i-mega" viewBox="0 0 24 24"><path d="M4 10.2v3.6a1 1 0 0 0 1 1h2.5l7 4V5.2l-7 4H5a1 1 0 0 0-1 1z"/><path d="M18 9.3a3.8 3.8 0 0 1 0 5.4"/></symbol>
+    <symbol id="i-list" viewBox="0 0 24 24"><path d="M10 7h10M10 12h10M10 17h10"/><path d="M4 7l1.3 1.3L7.5 6M4 12l1.3 1.3L7.5 11M4 17l1.3 1.3L7.5 16"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6"/><path d="M15 15l5 5"/></symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 7.5V12l3 2"/></symbol>
+    <symbol id="i-token" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M9 9.5h6M12 9.5v6"/></symbol>
+  </defs>
+</svg>
 <div id="intro" aria-hidden="true">
   <div class="stage">
     <video muted playsinline autoplay preload="auto" poster="/assets/prufy-intro-poster.jpg">
@@ -283,19 +368,22 @@ footer .src:hover{color:var(--accent)}
 
   <section class="hero">
     <h1>Is the tech <em>real</em>, or just a story?</h1>
-    <p>Paste a CA or a website. PRUF reads the project's code, probes its programs on-chain and checks the GitHub, then tells you which promises are real.</p>
+    <p>Drop a CA, a site or an X post. Prufy reads the code, probes it on-chain and tells you what's real and what's cap.</p>
   </section>
 
   <form class="card" id="form" autocomplete="off" novalidate>
     <div class="one">
       <label for="q" class="sr">Contract address or website</label>
-      <input id="q" placeholder="Paste a CA or website" spellcheck="false" autocapitalize="off" autocomplete="off">
+      <input id="q" placeholder="CA, site or X post" spellcheck="false" autocapitalize="off" autocomplete="off">
       <button type="submit" class="primary" id="run">Check <span aria-hidden="true">→</span></button>
     </div>
+    <ol class="log" id="log" hidden aria-live="polite"></ol>
     <div class="status" id="status" aria-live="polite"></div>
   </form>
 
   <section class="card" id="report" aria-live="polite"></section>
+
+  <section class="card" id="recent-wrap" hidden></section>
 
   <footer>PRUF reads public data only. Not financial advice.<br>
     <a id="src" class="src" href="__REPO__/commit/__COMMIT__" target="_blank" rel="noopener noreferrer">Open source · running commit __SHORT__ ↗</a>
@@ -312,6 +400,10 @@ footer .src:hover{color:var(--accent)}
   if (l.protocol !== "https:" || host !== l.hostname) l.replace("https://" + host + l.pathname + l.search + l.hash);
 })();
 const $ = id => document.getElementById(id);
+// Prufy's icon set: chunky, rounded strokes. ico() = bare icon, bub() = icon in a round tinted bubble.
+const SVGNS = "http://www.w3.org/2000/svg";
+function ico(name){ const s = document.createElementNS(SVGNS, "svg"); s.setAttribute("class", "ic"); s.setAttribute("aria-hidden", "true"); const u = document.createElementNS(SVGNS, "use"); u.setAttribute("href", "#i-" + name); s.append(u); return s; }
+function bub(name, tone){ const b = document.createElement("span"); b.className = "bub" + (tone ? " " + tone : ""); b.append(ico(name)); return b; }
 function el(tag, attrs = {}, ...kids){
   const n = document.createElement(tag);
   for (const [k,v] of Object.entries(attrs)){
@@ -336,9 +428,9 @@ function renderEmpty(){
   const box = $("report"); box.replaceChildren();
   box.append(el("div",{class:"empty-hero"}, el("img",{src:"/assets/prufy-base.webp",alt:"Prufy, the PRUF mascot",width:104,height:104}),
     el("div",{class:"sec"}, el("p",{class:"empty-title",text:"Prufy is waiting for a CA"}),
-    el("p",{class:"empty-sub",text:"PRUF reads the project's website code, finds the programs and wallets it uses, probes them on-chain and reads the GitHub. Then every promise gets one of four stamps."}))));
+    el("p",{class:"empty-sub",text:"Prufy reads the site and its JS, probes every program and wallet on-chain, checks the dev and the GitHub. Every promise gets a stamp:"}))));
   const g = el("div",{class:"empty-grid"});
-  [["proven","PRUF found it working: deployed, used, or in the code."],["trust","Runs on their servers. Can't be confirmed either way."],["busted","The evidence contradicts the promise."],["no_evidence","Promised, but nothing behind it anywhere."]]
+  [["proven","Found it on-chain or in the code. It's live."],["trust","Runs on their servers. Can't verify it, you're trusting the dev."],["busted","The evidence says otherwise."],["no_evidence","Promised. Nothing behind it."]]
     .forEach(([k,d]) => g.append(el("div",{class:"legend"}, pill(k), el("p",{text:d}))));
   box.append(g);
   const ex = el("button",{type:"button",text:"See an example report"});
@@ -354,7 +446,7 @@ const EXAMPLE = {
       flags:[{ tone:"bad", text:"2 places where on-screen numbers may be generated with Math.random()" }],
       launch:{ via:"pump.fun", created:null }, github:{ commits:1, authors:1, hasPrograms:true, isFork:false } },
     basics:[], sources:[], misses:[] },
-  report: { verdict:"busted", score:15, headline:"AI agent exists on paper, never used",
+  report: { verdict:"busted", score:25, headline:"AI agent exists on paper, never used",
     summary:"Program is deployed but has 0 txs. Live volume is random numbers. Treasury address doesn't exist.",
     claims:[
       { claim:"AI agent trades 24/7", status:"busted", evidence:"Their program: deployed 3 days ago, 0 txs since.", how_to_check:"Solscan → program → Transactions" },
@@ -389,10 +481,11 @@ function renderFacts(f){
   if (f.token?.image){ const img = el("img",{src:f.token.image,alt:"",loading:"lazy"}); img.onerror = () => img.remove(); tok.append(img); }
   tok.append(el("div",{class:"token-name"}, el("b",{text:title}), f.ca ? el("span",{text:[f.chain, f.ca].filter(Boolean).join(" · ")}) : null));
   box.append(tok);
+  if (f.tweet) box.append(el("blockquote",{class:"tweet"}, el("b",{text:"Checking this post by @" + f.tweet.handle}), el("p",{text:f.tweet.text})));
   box.append(el("div",{class:"pending",id:"pending"}, el("img",{src:"/assets/prufy-inspect.webp",alt:"",width:44,height:44}), "Prufy is matching promises to evidence…"));
 
   const t = f.tech || {};
-  const sec = el("div",{class:"sec",id:"tech"}, el("h3",{text:"🔍 What PRUF found"}));
+  const sec = el("div",{class:"sec",id:"tech"}, el("h3",{}, bub("eyes","acc"), "What Prufy found"));
   if (t.flags?.length){
     const a = el("div",{class:"alerts"});
     t.flags.forEach(x => a.append(el("div",{class:"alert",text:x.text})));
@@ -402,7 +495,7 @@ function renderFacts(f){
   if (t.programs?.length){
     const g = el("div",{class:"progs"});
     t.programs.forEach(p => {
-      const card = el("div",{class:"prog "+(p.tone||"warn")}, el("span",{class:"tag",text:"Own program"}),
+      const card = el("div",{class:"prog "+(p.tone||"warn")}, el("span",{class:"tag"}, ico("token"), "Own program"),
         el("a",{href:explorer(p.address),target:"_blank",rel:"noopener noreferrer",text:p.address}));
       p.lines.forEach(l => card.append(el("span",{text:l})));
       g.append(card);
@@ -411,32 +504,51 @@ function renderFacts(f){
   }
   if (t.wallets?.length){
     const g = el("div",{class:"progs"});
-    t.wallets.slice(0,4).forEach(w => g.append(el("div",{class:"prog warn"}, el("span",{class:"tag",text:"Wallet in their code"}),
+    t.wallets.slice(0,4).forEach(w => g.append(el("div",{class:"prog warn"}, el("span",{class:"tag"}, ico("wallet"), "Wallet in their code"),
       el("a",{href:explorer(w.address),target:"_blank",rel:"noopener noreferrer",text:w.address}),
       el("span",{text:`${(w.sol??0).toFixed(2)} SOL` + (w.txCount!=null ? ` · ${w.txCount} recent txs` : "")}))));
     sec.append(g);
   }
   if (t.dev){
     const g = el("div",{class:"progs"});
-    const card = el("div",{class:"prog "+(t.dev.tone||"warn")}, el("span",{class:"tag",text:"👤 Dev wallet"}),
+    const card = el("div",{class:"prog "+(t.dev.tone||"warn")}, el("span",{class:"tag"}, ico("user"), "Dev wallet"),
       el("a",{href:explorer(t.dev.address),target:"_blank",rel:"noopener noreferrer",text:t.dev.address}));
     t.dev.lines.forEach(l => card.append(el("span",{text:l})));
     g.append(card);
     sec.append(g);
   }
-  if (!t.programs?.length && !t.wallets?.length && !t.dev) sec.append(el("p",{class:"none-found",text:"No program or wallet of their own found in the site code, docs or GitHub."}));
+  if (t.fees){
+    const g = el("div",{class:"progs"});
+    const card = el("div",{class:"prog "+(t.fees.tone||"info")}, el("span",{class:"tag"}, ico("coins"), t.fees.title),
+      t.fees.address ? el("a",{href:explorer(t.fees.address),target:"_blank",rel:"noopener noreferrer",text:t.fees.address}) : null);
+    t.fees.lines.forEach(l => card.append(el("span",{text:l})));
+    g.append(card);
+    sec.append(g);
+  }
+  if (t.block){
+    const g = el("div",{class:"progs"});
+    const card = el("div",{class:"prog "+(t.block.tone||"info")}, el("span",{class:"tag"}, ico("rocket"), t.block.title));
+    t.block.lines.forEach(l => card.append(el("span",{text:l})));
+    g.append(card);
+    sec.append(g);
+  }
+  // One grid for all cards (programs, wallets, dev, fees), so they sit side by side.
+  const grids = [...sec.querySelectorAll(":scope > .progs")];
+  grids.slice(1).forEach(x => { grids[0].append(...x.children); x.remove(); });
+  if (!t.programs?.length && !t.wallets?.length && !t.dev && !t.fees && !t.block) sec.append(el("p",{class:"none-found",text:"No program or wallet of their own found in the site code, docs or GitHub."}));
 
   const chips = el("div",{class:"chips"});
-  (f.platforms || []).filter(n => !(t.launch && t.launch.via.toLowerCase().includes(n.split(" ")[0].toLowerCase()))).forEach(n => chips.append(el("span",{class:"chip",text:"🧩 " + n})));
-  if (t.launch) chips.append(el("span",{class:"chip",text:"🚀 Launched via " + (t.launch.via.length > 20 ? t.launch.via.slice(0,4) + "…" + t.launch.via.slice(-4) : t.launch.via) + (t.launch.created ? " · " + Math.max(1, Math.round((Date.now() - Date.parse(t.launch.created)) / 864e5)) + "d ago" : "")}));
+  (f.platforms || []).filter(n => !(t.launch && t.launch.via.toLowerCase().includes(n.split(" ")[0].toLowerCase()))).forEach(n => chips.append(el("span",{class:"chip"}, ico("apps"), n)));
+  if (f.replies) chips.append(el("span",{class:"chip"}, ico("chat"), `Read ${f.replies.read} repl${f.replies.read === 1 ? "y" : "ies"} on X`));
+  if (t.launch) chips.append(el("span",{class:"chip"}, ico("rocket"), "Launched via " + (t.launch.via.length > 20 ? t.launch.via.slice(0,4) + "…" + t.launch.via.slice(-4) : t.launch.via) + (t.launch.created ? " · " + Math.max(1, Math.round((Date.now() - Date.parse(t.launch.created)) / 864e5)) + "d ago" : "")));
   if (t.backend){
-    const B = { open_and_deployed:["chip ok","Open-source server · live commit " + (t.backend.commit||"").slice(0,7) + " matches the repo"], open_source_unproven:["chip","Server code is public, live version unproven"], closed:["chip dim","Runs on a closed server"] }[t.backend.level];
+    const B = { open_and_deployed:["chip ok","Open-source server · live commit " + (t.backend.commit||"").slice(0,7) + " matches the repo"], open_source_unproven:["chip","Server code is public, live version unproven"], closed:["chip dim","Server code not public"] }[t.backend.level];
     if (B) chips.append(el("span",{class:B[0],text:B[1]}));
   }
   if (t.builder) chips.append(el("span",{class:"chip",text:"Built with " + t.builder}));
   (t.stack||[]).forEach(x => chips.append(el("span",{class:"chip",text:x})));
   (t.usesKnown||[]).forEach(x => chips.append(el("span",{class:"chip dim",text:"Uses " + x})));
-  chips.append(el("span",{class:"chip" + (t.signsTransactions ? "" : " dim"),text: t.signsTransactions ? "Site can send transactions" : "Site can't send transactions"}));
+  chips.append(el("span",{class:"chip" + (t.signsTransactions ? "" : " dim"),text: t.signsTransactions ? "Site asks wallets to sign txs" : "No tx signing on site"}));
   if (t.github) chips.append(el("span",{class:"chip",text:`GitHub: ${t.github.commits ?? "?"} commit${t.github.commits===1?"":"s"} · ${t.github.authors} author${t.github.authors===1?"":"s"}` + (t.github.hasPrograms ? " · has on-chain programs" : "") + (t.github.isFork ? " · fork" : "")}));
   else chips.append(el("span",{class:"chip dim",text:"No GitHub"}));
   sec.append(chips);
@@ -445,11 +557,12 @@ function renderFacts(f){
   if (f.basics?.length){
     const g = el("div",{class:"checks"});
     f.basics.forEach(c => g.append(el("div",{class:"chk "+(c.tone||"info")}, el("i"), el("div",{}, el("span",{text:c.label}), el("b",{text:c.value})))));
-    box.append(el("hr"), el("details",{class:"basics"}, el("summary",{text:"Token basics"}), g));
+    box.append(el("hr"), el("details",{class:"basics"}, el("summary",{}, bub("token"), "Token basics"), g));
   }
 }
 
 function renderReport(r){
+  lastReport = r;
   const f = facts || {};
   const box = $("report");
   const pending = $("pending"); if (pending) pending.remove();
@@ -462,7 +575,7 @@ function renderReport(r){
   svg.append(svgEl("circle",{class:"track",cx:56,cy:56,r:R}));
   const val = svgEl("circle",{class:"val",cx:56,cy:56,r:R,"stroke-dasharray":C,"stroke-dashoffset":C});
   svg.append(val);
-  const ring = el("div",{class:"ring",role:"img","aria-label":`${score}% proven`}, svg, el("div",{class:"num"}, el("b",{text:score+"%"}), el("small",{text:"proven"})));
+  const ring = el("div",{class:"ring",role:"img","aria-label":`PRUF score ${score}%`}, svg, el("div",{class:"num"}, el("b",{text:score+"%"}), el("small",{text:"PRUF score"})));
   ring.style.setProperty("--c", RING_COLOR[v]);
   requestAnimationFrame(() => requestAnimationFrame(() => val.setAttribute("stroke-dashoffset", C*(1-score/100))));
   const reaction = el("img",{class:"reaction",src:`/assets/prufy-${FACE[v]}.webp`,alt:`Prufy: ${VERDICT[v]}`,width:128,height:128});
@@ -474,6 +587,8 @@ function renderReport(r){
   const tally = el("div",{class:"tally"});
   ["proven","trust","busted","no_evidence"].forEach(k => { if (counts[k]) tally.append(el("span",{}, face(k), `${counts[k]} ${STATUS[k]}`)); });
   if (claims.length) after.push(tally);
+  if (r.plain) after.push(el("div",{class:"plain"}, el("b",{text:"Bottom line"}), el("p",{text:r.plain})));
+  if (r.crowd) after.push(el("div",{class:"plain crowd"}, el("b",{text:"What the replies say"}), el("p",{text:r.crowd})));
   if (r.summary) after.push(el("div",{class:"tldr"}, el("b",{text:"TL;DR"}), el("p",{text:r.summary})));
   if (claims.length){
     const list = el("div",{class:"claims"});
@@ -484,15 +599,15 @@ function renderReport(r){
       if (c.how_to_check) body.append(el("details",{class:"how"}, el("summary",{text:"How to verify"}), el("p",{text:c.how_to_check})));
       list.append(el("div",{class:"claim"}, pill(s), body));
     }
-    after.push(el("hr"), el("div",{class:"sec"}, el("h3",{}, "Promises vs reality", el("span",{class:"n",text:String(claims.length)})), list));
+    after.push(el("hr"), el("div",{class:"sec"}, el("h3",{}, bub("list","acc"), "Promises vs reality", el("span",{class:"n",text:String(claims.length)})), list));
   }
   if (r.custody){
     const cu = el("div",{class:"ctrl"});
-    [["keys","🔑 Keys"],["fees","💸 Fees"],["funds","🏦 Your money"]].forEach(([k,l]) => cu.append(el("span",{}, el("b",{text:l}), r.custody[k]||"Unknown")));
-    after.push(el("hr"), el("div",{class:"sec"}, el("h3",{text:"Who controls what"}), cu));
+    [["keys","key","Keys"],["fees","coins","Fees"],["funds","wallet","Your money"]].forEach(([k,i,l]) => cu.append(el("span",{}, ico(i), el("b",{text:l}), r.custody[k]||"Unknown")));
+    after.push(el("hr"), el("div",{class:"sec"}, el("h3",{}, bub("key"), "Who controls what"), cu));
   }
-  const mkf = (cls, label, arr) => { const ul = el("ul",{class:cls}); (arr||[]).slice(0,4).forEach(x=>ul.append(el("li",{text:x}))); if(!(arr||[]).length) ul.append(el("li",{class:"none",text:"None found"})); return el("div",{class:"sec"}, el("h3",{text:label}), ul); };
-  after.push(el("hr"), el("div",{class:"flags"}, mkf("red","🚩 Red flags",r.red_flags), mkf("green","🟢 Green flags",r.green_flags)));
+  const mkf = (cls, label, arr, icon) => { const ul = el("ul",{class:cls}); (arr||[]).slice(0,4).forEach(x=>ul.append(el("li",{text:x}))); if(!(arr||[]).length) ul.append(el("li",{class:"none",text:"None found"})); return el("div",{class:"sec"}, el("h3",{}, bub(icon, cls === "red" ? "bad" : "ok"), label), ul); };
+  after.push(el("hr"), el("div",{class:"flags"}, mkf("red","Red flags",r.red_flags,"flag"), mkf("green","Green flags",r.green_flags,"shield")));
   tok.after(...after);
 
   const tail = [];
@@ -503,7 +618,7 @@ function renderReport(r){
     links.forEach(([n,h]) => lw.append(el("a",{href:h,target:"_blank",rel:"noopener noreferrer",text:n+" ↗"})));
     srcs.filter(s => !links.some(([,h]) => h === s.url) && s.label !== "DexScreener" && s.label !== "Solana mint account")
       .forEach(s => lw.append(el("a",{href:s.url,target:"_blank",rel:"noopener noreferrer",text:s.label+" ↗"})));
-    const sec = el("div",{class:"sec"}, el("h3",{text:"Check it yourself"}), lw);
+    const sec = el("div",{class:"sec"}, el("h3",{}, bub("search"), "Check it yourself"), lw);
     if (f.misses?.length) sec.append(el("p",{class:"misses",text:"Couldn't read: " + f.misses.join(" · ")}));
     tail.push(el("hr"), sec);
   }
@@ -514,9 +629,9 @@ function renderReport(r){
       try { await navigator.clipboard.writeText(r.post); copyBtn.textContent = "Copied"; setTimeout(()=>copyBtn.textContent="Copy",1500); }
       catch { const rg = document.createRange(); rg.selectNodeContents(p); const s = getSelection(); s.removeAllRanges(); s.addRange(rg); }
     };
-    tail.push(el("div",{class:"sec"}, el("h3",{text:"📣 Share the verdict"}), el("div",{class:"post"}, p, el("div",{class:"post-foot"}, el("span",{text:r.post.length+" / 280"}), copyBtn))));
+    tail.push(el("div",{class:"sec"}, el("h3",{}, bub("mega","acc"), "Share the verdict"), el("div",{class:"post"}, p, el("div",{class:"post-foot"}, el("span",{text:r.post.length+" / 280"}), el("div",{class:"share-row"}, copyBtn, el("div",{id:"share-actions",class:"share-row"}, ...(shareId ? shareButtons() : [])))))));
   }
-  tail.push(el("p",{class:"note",text:"PRUF reads public code and on-chain data only. It can't see private servers, so 'Trust' means unknown, not fake."}));
+  tail.push(el("p",{class:"note",text:"Automated, can be wrong — read the evidence, DYOR. 'Real' = the tech exists, not that it's safe or will pump. 'Trust me bro' = can't be checked, not fake. NFA."}));
   box.append(...tail);
 }
 
@@ -528,14 +643,23 @@ function status(msg, isErr, spinning){
 
 let savedCode = ""; try { savedCode = localStorage.getItem("pruf-code") || ""; } catch {}
 
-$("form").addEventListener("submit", async e => {
+$("form").addEventListener("submit", e => {
   e.preventDefault();
   const q = $("q").value.trim();
-  if (!q){ status("Paste a contract address or a website.", true); $("q").focus(); return; }
-  const isAddr = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(q) || /^0x[a-fA-F0-9]{40}$/.test(q);
-  const body = { ca: isAddr ? q : "", website: isAddr ? "" : q, code: ($("code")?.value.trim() || savedCode) };
+  if (!q){ status("Paste a CA, a website or an X post.", true); $("q").focus(); return; }
+  // One box: a CA, a website, or both (separated by a space) to also check they belong together.
+  const parts = q.split(/[\s,]+/).filter(Boolean);
+  const isAddr = x => /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(x) || /^0x[a-fA-F0-9]{40}$/.test(x);
+  runCheck({ ca: parts.find(isAddr) || "", website: parts.find(x => !isAddr(x)) || "" });
+});
+
+let shareId = null;
+async function runCheck(body){
+  body.code = $("code")?.value.trim() || savedCode;
+  shareId = null;
   $("run").disabled = true;
-  status("Starting…", false, true);
+  status("");
+  logStart();
   facts = null;
   let gotReport = false;
   try{
@@ -551,9 +675,10 @@ $("form").addEventListener("submit", async e => {
         const line = buf.slice(0, i).trim(); buf = buf.slice(i + 1);
         if (!line) continue;
         let ev; try { ev = JSON.parse(line); } catch { continue; }
-        if (ev.t === "step") status(ev.msg + "…", false, true);
+        if (ev.t === "step") logStep(ev.msg);
         else if (ev.t === "facts"){ renderFacts(ev.data); $("report").scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block:"start" }); }
-        else if (ev.t === "report"){ gotReport = true; renderReport(ev.data); status(""); }
+        else if (ev.t === "report"){ gotReport = true; renderReport(ev.data); logEnd(true); }
+        else if (ev.t === "saved") onSaved(ev, body);
         else if (ev.t === "error"){
           if (ev.code === "access"){
             let cf = $("code-field");
@@ -572,16 +697,115 @@ $("form").addEventListener("submit", async e => {
     const p = $("pending");
     if (p) p.replaceWith(el("div",{class:"oops",id:"pending"}, el("img",{src:"/assets/prufy-error.webp",alt:"",width:72,height:72}), msg));
     else if (!facts && !err.access) $("report").replaceChildren(el("div",{class:"oops"}, el("img",{src:"/assets/prufy-error.webp",alt:"",width:72,height:72}), msg));
+    logEnd(false);
     status(String(err.message || err), true);
   }finally{
     $("run").disabled = false;
   }
-});
+}
+
+// ---- live checklist of what Prufy is doing ----
+let logT0 = 0, logLast = null;
+function logStart(){ const l = $("log"); l.replaceChildren(); l.hidden = false; logT0 = performance.now(); logLast = null; logStep("Starting"); }
+function logTick(ok){ if (!logLast) return; const ms = performance.now() - logLast.t; logLast.li.classList.remove("doing"); logLast.li.classList.add(ok ? "done" : "fail"); logLast.li.querySelector(".t").textContent = ms < 1000 ? Math.round(ms) + "ms" : (ms / 1000).toFixed(1) + "s"; }
+function logStep(msg){ logTick(true); const li = el("li",{class:"doing"}, el("span",{class:"m",text:msg}), el("span",{class:"t"})); $("log").append(li); logLast = { li, t: performance.now() }; }
+function logEnd(ok){ logTick(ok); logLast = null; if (ok){ const s = ((performance.now() - logT0) / 1000).toFixed(1); $("log").append(el("li",{class:"done final"}, el("span",{class:"m",text:"Verdict ready"}), el("span",{class:"t",text:s + "s total"}))); } }
+
+// ---- share link, saved card, recently checked ----
+const shareUrl = id => `${location.origin}/?r=${id}`;
+function onSaved(ev, body){
+  shareId = ev.id;
+  try { history.replaceState(null, "", "/?r=" + ev.id); } catch {}
+  if (!ev.cached) setTimeout(loadRecent, 1500);
+  const box = $("share-actions"); if (!box) return;
+  box.replaceChildren(...shareButtons());
+  if (ev.cached && body){
+    const again = el("button",{type:"button",text:"Re-check now"});
+    again.onclick = () => runCheck({ ...body, fresh:true });
+    $("report").querySelector(".token")?.after(el("p",{class:"cached-note"}, `Saved check from ${agoTxt(ev.at)} ago · `, again));
+  }
+}
+function shareButtons(){
+  const link = el("button",{type:"button",text:"Copy link"});
+  link.onclick = async () => { try { await navigator.clipboard.writeText(shareUrl(shareId)); link.textContent = "Link copied"; setTimeout(() => link.textContent = "Copy link", 1500); } catch { prompt("Copy this link", shareUrl(shareId)); } };
+  const card = el("button",{type:"button",text:"Save card"});
+  card.onclick = () => saveCard(card);
+  return [link, card];
+}
+const agoTxt = t => { const m = Math.max(1, Math.round((Date.now() - t) / 60000)); return m < 60 ? m + " min" : Math.round(m / 60) + " h"; };
+
+// A 1200×675 image of the verdict with Prufy, for X.
+let lastReport = null;
+async function saveCard(btn){
+  const r = lastReport, f = facts || {};
+  if (!r) return;
+  btn.textContent = "Making card…";
+  try {
+    await document.fonts.ready;
+    const v = VERDICT[r.verdict] ? r.verdict : "no_evidence";
+    const C = { proven:"#35d07f", trust:"#f2b04c", busted:"#ff6b63", no_evidence:"#8f9ff0" }[v];
+    const cv = document.createElement("canvas"); cv.width = 1200; cv.height = 675;
+    const x = cv.getContext("2d");
+    x.fillStyle = "#0b0c0c"; x.fillRect(0, 0, 1200, 675);
+    const g = x.createRadialGradient(930, 330, 20, 930, 330, 330); g.addColorStop(0, C + "40"); g.addColorStop(1, "#0b0c0c00");
+    x.fillStyle = g; x.fillRect(560, 0, 640, 675);
+    const img = await new Promise((ok, no) => { const i = new Image(); i.onload = () => ok(i); i.onerror = no; i.src = `/assets/prufy-${FACE[v]}.webp`; });
+    x.drawImage(img, 720, 130, 420, 420);
+    const title = f.token ? `${f.token.name} ($${f.token.symbol})` : f.website ? new URL(f.website).hostname : "Project";
+    x.fillStyle = "#9aa19d"; x.font = "500 30px Geist, sans-serif"; x.fillText(title.slice(0, 40), 70, 110);
+    x.fillStyle = C; x.font = "800 64px 'Baloo 2', sans-serif"; x.fillText(VERDICT[v], 70, 200);
+    x.fillStyle = "#eef1ef"; x.font = "800 120px 'Baloo 2', sans-serif"; x.fillText((Math.round(r.score) || 0) + "%", 70, 340);
+    x.fillStyle = "#9aa19d"; x.font = "500 28px Geist, sans-serif"; x.fillText("PRUF score: how much of the tech checks out", 76, 385);
+    // headline, wrapped
+    x.fillStyle = "#eef1ef"; x.font = "700 40px 'Baloo 2', sans-serif";
+    let line = "", y = 470; for (const w of String(r.headline || "").split(" ")){ const t = line ? line + " " + w : w; if (x.measureText(t).width > 600){ x.fillText(line, 70, y); line = w; y += 48; if (y > 560) break; } else line = t; } if (y <= 560) x.fillText(line, 70, y);
+    x.fillStyle = "#35d07f"; x.font = "800 34px 'Baloo 2', sans-serif"; x.fillText("PRUF.fun", 70, 625);
+    x.fillStyle = "#6c736f"; x.font = "500 22px Geist, sans-serif"; x.fillText("Don't trust. PRUF it.", 240, 623);
+    const blob = await new Promise(ok => cv.toBlob(ok, "image/png"));
+    const file = new File([blob], "pruf-verdict.png", { type:"image/png" });
+    if (navigator.canShare?.({ files:[file] })) await navigator.share({ files:[file], text: (r.post || "") + (shareId ? " " + shareUrl(shareId) : "") });
+    else { const a = el("a",{href:URL.createObjectURL(blob),download:"pruf-verdict.png"}); document.body.append(a); a.click(); a.remove(); }
+    btn.textContent = "Save card";
+  } catch { btn.textContent = "Couldn't make the card"; }
+}
+
+async function loadSaved(id){
+  status("Loading saved check…", false, true);
+  try {
+    const r = await fetch("/api/reports?id=" + encodeURIComponent(id));
+    if (!r.ok) throw 0;
+    const j = await r.json();
+    renderFacts(j.facts); renderReport(j.report); onSaved({ id, cached:true, at:j.at }, null);
+    $("report").querySelector(".token")?.after(el("p",{class:"cached-note",text:`Saved check from ${agoTxt(j.at)} ago`}));
+    status("");
+  } catch { status("That saved check doesn't exist anymore.", true); renderEmpty(); }
+}
+
+async function loadRecent(){
+  const box = $("recent-wrap");
+  try {
+    const r = await fetch("/api/reports"); if (!r.ok) return;
+    const list = ((await r.json()).recent || []).slice(0, 8);
+    if (!list.length) return;
+    box.replaceChildren(); box.hidden = false;
+    const ul = el("div",{class:"recent"});
+    list.forEach(e => {
+      const k = VERDICT[e.verdict] ? e.verdict : "no_evidence";
+      const a = el("a",{href:"/?r=" + e.id,class:"recent-item"}, face(k), el("span",{class:"recent-title",text:e.title}), el("span",{class:"recent-score",text:(Math.round(e.score)||0) + "%"}), el("span",{class:"recent-ago",text:agoTxt(e.at)}));
+      a.onclick = ev => { ev.preventDefault(); history.pushState(null, "", "/?r=" + e.id); loadSaved(e.id); };
+      ul.append(a);
+    });
+    box.append(el("div",{class:"sec"}, el("h3",{}, bub("clock"), "Recently checked by Prufy"), ul));
+  } catch {}
+}
 
 // Before the first Git deploy the source links aren't filled in yet: hide them.
 ["src","repo"].forEach(id => { const a = $(id); if (a && a.getAttribute("href").includes("__")) a.remove(); });
 
-renderEmpty();
+loadRecent();
+const startId = new URLSearchParams(location.search).get("r");
+if (startId && /^[0-9a-f]{10}$/.test(startId)) loadSaved(startId); else renderEmpty();
+addEventListener("popstate", () => { const id = new URLSearchParams(location.search).get("r"); if (id) loadSaved(id); else renderEmpty(); });
 </script>
 </body>
 </html>
