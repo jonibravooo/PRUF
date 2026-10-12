@@ -27,6 +27,7 @@
   color-scheme:dark;
   --bg:#0b0c0c; --surface:#141616; --field:#1b1e1d; --ink:#eef1ef; --muted:#9aa19d; --faint:#6c736f; --line:#232726;
   --accent:#35d07f; --accent-soft:#12291c;
+  --meme:#ff6fa3; --meme-bg:#2f1520;
   --ok:#35d07f; --ok-bg:#12291c; --warn:#f2b04c; --warn-bg:#2b2111; --bad:#ff6b63; --bad-bg:#311715; --info:#8f9ff0; --info-bg:#1a1e33;
   --shadow:0 1px 2px rgba(0,0,0,.3),0 8px 24px -12px rgba(0,0,0,.5);
   --f-sans:"Geist",ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
@@ -109,7 +110,7 @@ button:disabled{opacity:.45;cursor:not-allowed;transform:none}
 .rep-meta{display:flex;flex-direction:column;gap:8px;min-width:0}
 .verdict{--c:var(--muted);--cb:var(--field);display:inline-flex;align-items:center;gap:7px;align-self:flex-start;background:var(--cb);color:var(--c);font-size:.8rem;font-weight:600;padding:5px 11px 5px 9px;border-radius:999px}
 .verdict i{width:7px;height:7px;border-radius:50%;background:var(--c)}
-.v-proven{--c:var(--ok);--cb:var(--ok-bg)} .v-trust{--c:var(--warn);--cb:var(--warn-bg)} .v-busted{--c:var(--bad);--cb:var(--bad-bg)} .v-no_evidence{--c:var(--info);--cb:var(--info-bg)}
+.v-meme{--c:var(--meme);--cb:var(--meme-bg)} .v-proven{--c:var(--ok);--cb:var(--ok-bg)} .v-trust{--c:var(--warn);--cb:var(--warn-bg)} .v-busted{--c:var(--bad);--cb:var(--bad-bg)} .v-no_evidence{--c:var(--info);--cb:var(--info-bg)}
 .rep-meta h2{margin:0;font-family:var(--f-title);font-size:1.6rem;letter-spacing:-.02em;font-weight:800;line-height:1.2;text-wrap:balance}
 .summary{margin:0;color:var(--muted);max-width:66ch}
 .pending{display:flex;align-items:center;gap:10px;color:var(--muted);font-size:.9rem;background:var(--field);border-radius:12px;padding:14px}
@@ -140,7 +141,7 @@ hr{border:0;border-top:1px solid var(--line);margin:0}
 @media (max-width:520px){.claim{grid-template-columns:minmax(0,1fr);gap:8px}}
 .pill{font-size:.72rem;font-weight:600;padding:3px 9px;border-radius:999px;align-self:start;justify-self:start;white-space:nowrap}
 .p-proven{background:var(--ok-bg);color:var(--ok)} .p-trust{background:var(--warn-bg);color:var(--warn)}
-.p-busted{background:var(--bad-bg);color:var(--bad)} .p-no_evidence{background:var(--info-bg);color:var(--info)}
+.p-meme{background:var(--meme-bg);color:var(--meme)} .p-busted{background:var(--bad-bg);color:var(--bad)} .p-no_evidence{background:var(--info-bg);color:var(--info)}
 .tally{display:flex;flex-wrap:wrap;gap:6px}
 .tally span{font-size:.8rem;font-weight:600;padding:3px 9px;border-radius:999px;background:var(--field);color:var(--ink);font-variant-numeric:tabular-nums}
 .story{display:flex;flex-direction:column;gap:8px;border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:12px;padding:12px 14px}
@@ -265,6 +266,12 @@ footer .src:hover{color:var(--accent)}
 .pending img{width:44px;height:44px;object-fit:contain;flex:none;animation:inspect 1.6s ease-in-out infinite;transform-origin:50% 80%}
 @keyframes inspect{0%,100%{transform:translateX(-4px) rotate(-6deg)}50%{transform:translateX(4px) rotate(6deg)}}
 .rep-top{grid-template-columns:auto auto minmax(0,1fr)}
+.rep-top.no-ring{grid-template-columns:auto minmax(0,1fr)}
+.story-facts{display:flex;flex-direction:column;gap:6px;margin-top:10px}
+.sf{display:grid;grid-template-columns:92px minmax(0,1fr);gap:10px;font-size:.86rem;line-height:1.4}
+.sf-k{color:var(--faint);font-size:.78rem;padding-top:1px}
+.sf-v{color:var(--ink);overflow-wrap:anywhere}
+.sf-v a{color:var(--accent);text-decoration:none}
 @media (max-width:520px){.rep-top{grid-template-columns:auto auto;justify-content:start}.rep-top .rep-meta{grid-column:1/-1}}
 .reaction{width:128px;height:128px;object-fit:contain;filter:drop-shadow(0 0 28px var(--glow,transparent));animation:pop .55s cubic-bezier(.2,1.4,.4,1) both}
 @media (max-width:520px){.reaction{width:112px;height:112px}}
@@ -312,6 +319,7 @@ button.primary:active{transform:translateY(0) scale(.98)}
 .legend:has(.p-trust){background:color-mix(in srgb,var(--warn) 7%,transparent)}
 .legend:has(.p-busted){background:color-mix(in srgb,var(--bad) 7%,transparent)}
 .legend:has(.p-no_evidence){background:color-mix(in srgb,var(--info) 8%,transparent)}
+.legend:has(.p-meme){grid-column:1/-1;background:color-mix(in srgb,var(--meme) 7%,transparent)}
 .alert{border-radius:14px}
 .links a{background:var(--field);border-color:transparent}
 .badge{font-family:var(--f-title);font-weight:700;font-size:.74rem;color:var(--accent);background:var(--accent-soft);border-color:transparent;padding:3px 11px 2px}
@@ -620,15 +628,15 @@ function el(tag, attrs = {}, ...kids){
 }
 const svgEl = (tag, attrs) => { const n = document.createElementNS("http://www.w3.org/2000/svg", tag); for (const [k,v] of Object.entries(attrs)) n.setAttribute(k, v); return n; };
 
-const VERDICT = { proven:"Tech is real", trust:"Trust me bro", busted:"Cap detected", no_evidence:"Vaporware" };
+const VERDICT = { proven:"Tech is real", trust:"Trust me bro", busted:"Cap detected", no_evidence:"Vaporware", meme:"It's a meme" };
 const STATUS = { proven:"Real", trust:"Trust me bro", busted:"Cap", no_evidence:"Vapor" };
-const FACE = { proven:"real", trust:"trust", busted:"cap", no_evidence:"vapor" };
-const GLOW = { proven:"rgba(53,208,127,.45)", trust:"rgba(242,176,76,.4)", busted:"rgba(255,107,99,.45)", no_evidence:"rgba(143,159,240,.45)" };
+const FACE = { proven:"real", trust:"trust", busted:"cap", no_evidence:"vapor", meme:"meme" };
+const GLOW = { proven:"rgba(53,208,127,.45)", trust:"rgba(242,176,76,.4)", busted:"rgba(255,107,99,.45)", no_evidence:"rgba(143,159,240,.45)", meme:"rgba(255,92,140,.45)" };
 const face = k => el("img",{class:"face",src:`/assets/prufy-${FACE[k]}-sm.webp`,alt:"",width:18,height:18});
-const pill = k => el("span",{class:"pill p-"+k}, face(k), STATUS[k]);
+const pill = k => el("span",{class:"pill p-"+k}, face(k), STATUS[k] || VERDICT[k]);
 // Load every face early so verdicts pop instantly.
 Object.values(FACE).concat(["inspect","error"]).forEach(n => { new Image().src = `/assets/prufy-${n}.webp`; });
-const RING_COLOR = { proven:"var(--ok)", trust:"var(--warn)", busted:"var(--bad)", no_evidence:"var(--info)" };
+const RING_COLOR = { proven:"var(--ok)", trust:"var(--warn)", busted:"var(--bad)", no_evidence:"var(--info)", meme:"var(--meme)" };
 
 function renderEmpty(){
   const box = $("report"); box.replaceChildren();
@@ -636,7 +644,7 @@ function renderEmpty(){
     el("div",{class:"sec"}, el("p",{class:"empty-title",text:"Prufy is waiting for a CA"}),
     el("p",{class:"empty-sub",text:"Prufy reads the site and its JS, probes programs and wallets on-chain, tracks the dev, checks if it's the OG and if the story's sources are real. Every claim gets a verdict:"}))));
   const g = el("div",{class:"empty-grid"});
-  [["proven","Found it on-chain or in the code. It's live."],["trust","Runs on their servers. Can't verify it, you're trusting the dev."],["busted","The evidence says otherwise."],["no_evidence","Promised. Nothing behind it."]]
+  [["proven","Found it on-chain or in the code. It's live."],["trust","Runs on their servers. Can't verify it, you're trusting the dev."],["busted","The evidence says otherwise."],["no_evidence","Promised. Nothing behind it."],["meme","No tech promised, nothing to larp. Prufy reads the story instead: where it comes from, who it's about, what it trades against and who gets the fees."]]
     .forEach(([k,d]) => g.append(el("div",{class:"legend"}, pill(k), el("p",{text:d}))));
   box.append(g);
   const ex = el("button",{type:"button",text:"See an example report"});
@@ -793,6 +801,7 @@ function renderReport(r){
   const pending = $("pending"); if (pending) pending.remove();
   const tok = box.querySelector(".token");
   const v = VERDICT[r.verdict] ? r.verdict : "no_evidence";
+  const isMeme = v === "meme" || r.score == null;
   const score = Math.max(0, Math.min(100, Math.round(Number(r.score)||0)));
 
   const R = 46, C = 2*Math.PI*R;
@@ -807,7 +816,7 @@ function renderReport(r){
   reaction.style.setProperty("--glow", GLOW[v]);
   const photo = el("figure",{class:"polaroid"}, reaction);
   photo.style.setProperty("--glow", GLOW[v]);
-  const top = el("div",{class:"rep-top"}, photo, ring, el("div",{class:"rep-meta"}, el("span",{class:"verdict v-"+v}, face(v), VERDICT[v]), el("h2",{text:r.headline || "Report"})));
+  const top = el("div",{class:"rep-top" + (isMeme ? " no-ring" : "")}, photo, isMeme ? null : ring, el("div",{class:"rep-meta"}, el("span",{class:"verdict v-"+v}, face(v), VERDICT[v]), el("h2",{text:r.headline || "Report"})));
   const after = [top];
   const claims = Array.isArray(r.claims) ? r.claims : [];
   const counts = {}; claims.forEach(c => { const k = STATUS[c.status] ? c.status : "no_evidence"; counts[k] = (counts[k]||0) + 1; });
@@ -816,9 +825,20 @@ function renderReport(r){
   if (claims.length) after.push(tally);
   const REL = { official:"Official · it's theirs", acknowledged:"Acknowledged · not run by them", tribute:"Tribute coin · not affiliated", impersonation:"Poses as official · no proof", unverified:"Link not verified" };
   const lk = r.link && r.link.subject && REL[r.link.relation] ? r.link : null;
-  if (r.story || lk){
+  const pairs = (f.pairedWith || []).filter(p => p && p.symbol);
+  const og = r.origin && (r.origin.what || r.origin.where) ? r.origin : null;
+  if (r.story || lk || og || r.meta || pairs.length){
     const box = el("div",{class:"story"}, el("b",{text:"What's going on"}));
     if (r.story) box.append(el("p",{text:r.story}));
+    const facts2 = el("div",{class:"story-facts"});
+    if (og){
+      const where = [og.where, og.when].filter(Boolean).join(" · ");
+      const src = og.url && /^https:\/\//.test(og.url) ? el("a",{href:og.url,target:"_blank",rel:"noopener noreferrer",text:(where || "source") + " ↗"}) : where ? el("span",{text:where}) : null;
+      facts2.append(el("div",{class:"sf"}, el("span",{class:"sf-k",text:"Origin"}), el("span",{class:"sf-v"}, og.what || "", src ? " — " : "", src)));
+    }
+    if (pairs.length) facts2.append(el("div",{class:"sf"}, el("span",{class:"sf-k",text:"Paired with"}), el("span",{class:"sf-v",text:pairs.map(p => p.symbol + (p.name && p.name !== p.symbol ? ` (${p.name})` : "")).join(", ")})));
+    if (r.meta) facts2.append(el("div",{class:"sf"}, el("span",{class:"sf-k",text:"Meta"}), el("span",{class:"sf-v",text:r.meta})));
+    if (facts2.childNodes.length) box.append(facts2);
     if (lk){ box.append(el("span",{class:"rel r-"+lk.relation}, el("span",{text:lk.subject}), el("i",{text:"→"}), el("span",{text:REL[lk.relation]}))); if (lk.proof) box.append(el("span",{class:"rel-proof",text:lk.proof})); }
     after.push(box);
   }
@@ -837,9 +857,9 @@ function renderReport(r){
       if (c.how_to_check) body.append(el("details",{class:"how"}, el("summary",{text:"How to verify"}), el("p",{text:c.how_to_check})));
       list.append(el("div",{class:"claim"}, el("div",{class:"claim-l"}, el("span",{class:"exh",text:"Exhibit " + letter}), pill(s)), body));
     }
-    after.push(el("hr"), el("div",{class:"sec"}, el("h3",{}, bub("list","acc"), "Promises vs reality", el("span",{class:"n",text:String(claims.length)})), list));
+    after.push(el("hr"), el("div",{class:"sec"}, el("h3",{}, bub("list","acc"), isMeme ? "Story checks" : "Promises vs reality", el("span",{class:"n",text:String(claims.length)})), list));
   }
-  if (r.custody){
+  if (r.custody && ["keys","fees","funds"].some(k => r.custody[k])){
     const cu = el("div",{class:"form"});
     [["keys","Keys"],["fees","Fees"],["funds","Your money"]].forEach(([k,l]) => cu.append(el("div",{class:"form-row"}, el("span",{class:"form-k",text:l}), el("span",{class:"form-v",text:r.custody[k]||"Unknown"}))));
     after.push(el("hr"), el("div",{class:"sec"}, el("h3",{}, bub("key"), "Who controls what"), cu));
@@ -870,7 +890,7 @@ function renderReport(r){
     tail.push(el("div",{class:"sec"}, el("h3",{}, bub("mega","acc"), "Share the verdict"), el("div",{class:"post"}, p, el("div",{class:"post-foot"}, el("span",{text:r.post.length+" / 280"}), el("div",{class:"share-row"}, copyBtn, el("div",{id:"share-actions",class:"share-row"}, ...(shareId ? shareButtons() : [])))))));
   }
   tail.push(feedbackBox());
-  tail.push(el("p",{class:"note",text:"Automated, can be wrong — read the evidence, DYOR. 'Real' = it checks out (tech or story), not that it's safe or will pump. 'Trust me bro' = can't be checked, not fake. NFA."}));
+  tail.push(el("p",{class:"note",text:"Automated, can be wrong — read the evidence, DYOR. 'Real' = it checks out (tech or story), not that it's safe or will pump. 'Trust me bro' = can't be checked, not fake. 'It's a meme' = no tech promised, not good or bad. NFA."}));
   box.append(...tail);
 }
 
@@ -1015,7 +1035,7 @@ async function saveCard(btn){
   try {
     await document.fonts.ready;
     const v = VERDICT[r.verdict] ? r.verdict : "no_evidence";
-    const C = { proven:"#35d07f", trust:"#f2b04c", busted:"#ff6b63", no_evidence:"#8f9ff0" }[v];
+    const C = { proven:"#35d07f", trust:"#f2b04c", busted:"#ff6b63", no_evidence:"#8f9ff0", meme:"#ff6fa3" }[v];
     const cv = document.createElement("canvas"); cv.width = 1200; cv.height = 675;
     const x = cv.getContext("2d");
     x.fillStyle = "#0b0c0c"; x.fillRect(0, 0, 1200, 675);
@@ -1026,8 +1046,13 @@ async function saveCard(btn){
     const title = f.token ? `${f.token.name} ($${f.token.symbol})` : f.website ? new URL(f.website).hostname : "Project";
     x.fillStyle = "#9aa19d"; x.font = "500 30px Geist, sans-serif"; x.fillText(title.slice(0, 40), 70, 110);
     x.fillStyle = C; x.font = "800 64px 'Baloo 2', sans-serif"; x.fillText(VERDICT[v], 70, 200);
-    x.fillStyle = "#eef1ef"; x.font = "800 120px 'Baloo 2', sans-serif"; x.fillText((Math.round(r.score) || 0) + "%", 70, 340);
-    x.fillStyle = "#9aa19d"; x.font = "500 28px Geist, sans-serif"; x.fillText("PRUF score: how much of the tech checks out", 76, 385);
+    if (v === "meme" || r.score == null){
+      x.fillStyle = "#eef1ef"; x.font = "800 88px 'Baloo 2', sans-serif"; x.fillText("No larp.", 70, 320);
+      x.fillStyle = "#9aa19d"; x.font = "500 28px Geist, sans-serif"; x.fillText("No tech promised — Prufy read the story", 76, 375);
+    } else {
+      x.fillStyle = "#eef1ef"; x.font = "800 120px 'Baloo 2', sans-serif"; x.fillText((Math.round(r.score) || 0) + "%", 70, 340);
+      x.fillStyle = "#9aa19d"; x.font = "500 28px Geist, sans-serif"; x.fillText("PRUF score: how much of the tech checks out", 76, 385);
+    }
     // headline, wrapped
     x.fillStyle = "#eef1ef"; x.font = "700 40px 'Baloo 2', sans-serif";
     let line = "", y = 470; for (const w of String(r.headline || "").split(" ")){ const t = line ? line + " " + w : w; if (x.measureText(t).width > 600){ x.fillText(line, 70, y); line = w; y += 48; if (y > 560) break; } else line = t; } if (y <= 560) x.fillText(line, 70, y);
@@ -1063,7 +1088,7 @@ async function loadRecent(){
     const ul = el("div",{class:"recent"});
     list.forEach(e => {
       const k = VERDICT[e.verdict] ? e.verdict : "no_evidence";
-      const a = el("a",{href:"/?r=" + e.id,class:"recent-item"}, face(k), el("span",{class:"recent-title",text:e.title}), el("span",{class:"recent-score",text:(Math.round(e.score)||0) + "%"}), el("span",{class:"recent-ago",text:agoTxt(e.at)}));
+      const a = el("a",{href:"/?r=" + e.id,class:"recent-item"}, face(k), el("span",{class:"recent-title",text:e.title}), el("span",{class:"recent-score",text:e.score == null || k === "meme" ? "meme" : (Math.round(e.score)||0) + "%"}), el("span",{class:"recent-ago",text:agoTxt(e.at)}));
       a.onclick = ev => { ev.preventDefault(); history.pushState(null, "", "/?r=" + e.id); loadSaved(e.id); };
       ul.append(a);
     });

@@ -13,17 +13,18 @@ const reportId = key => createHash("sha1").update(String(key).toLowerCase()).dig
 function liveStore(){ try { return getStore({ name: "reports", consistency: "strong" }); } catch { return reportStore(); } }
 const sleep = ms => new Promise(ok => setTimeout(ok, ms));
 
-// Fresh checks per IP per hour (saved checks don't count). PRUF_RATE_LIMIT in Netlify changes it; 0 = off.
+// Fresh checks per IP per 2 hours (saved checks don't count). PRUF_RATE_LIMIT in Netlify changes it; 0 = off.
 // The IP is never stored, only a salted hash of it.
+const RATE_WINDOW = 2 * 3600e3;
 async function rateCheck(store, ip){
-  const limit = Number(process.env.PRUF_RATE_LIMIT ?? 6);
+  const limit = Number(process.env.PRUF_RATE_LIMIT ?? 20);
   if (!store || !ip || !(limit > 0)) return null;
   const key = "rl/" + createHash("sha256").update(ip + "|" + (process.env.PRUF_SALT || "prufy")).digest("hex").slice(0, 20);
   const now = Date.now();
-  const recent = ((await store.get(key, { type: "json" }).catch(() => null)) || []).filter(t => now - t < 3600e3);
+  const recent = ((await store.get(key, { type: "json" }).catch(() => null)) || []).filter(t => now - t < RATE_WINDOW);
   if (recent.length >= limit){
-    const mins = Math.max(1, Math.ceil((recent[0] + 3600e3 - now) / 60000));
-    return `That's ${limit} fresh checks from you this hour. Saved checks still open instantly — new ones again in ${mins} min.`;
+    const mins = Math.max(1, Math.ceil((recent[0] + RATE_WINDOW - now) / 60000));
+    return `That's ${limit} fresh checks from you in 2 hours. Saved checks still open instantly — new ones again in ${mins} min.`;
   }
   await store.setJSON(key, [...recent, now]).catch(() => {});
   return null;
@@ -439,7 +440,22 @@ async function dexscreener(ca){
     liquidityUsd: pairs.reduce((s, p) => s + (p.liquidity?.usd || 0), 0), marketCap: top.marketCap ?? top.fdv ?? null,
     volume24h: pairs.reduce((s, p) => s + (p.volume?.h24 || 0), 0),
     websites: (withInfo.info?.websites || []).map(w => w.url), socials: (withInfo.info?.socials || []).map(s => ({ type: s.type, url: s.url })),
+    // What it trades against. SOL/USDC/USDT = normal; anything else (a tokenized stock, PUMP, ANTHROPIC…) is a narrative play.
+    pairedWith: [...new Map(pairs.filter(p => p.quoteToken?.address && !STD_QUOTES.has(p.quoteToken.address) && !/^(w?SOL|USDC|USDT|USD1)$/i.test(p.quoteToken.symbol || ""))
+      .map(p => [p.quoteToken.address, { symbol: p.quoteToken.symbol, name: p.quoteToken.name, ca: p.quoteToken.address, dex: p.dexId, liquidityUsd: Math.round(p.liquidity?.usd || 0) }])).values()].slice(0, 5),
   };
+}
+const STD_QUOTES = new Set(["So11111111111111111111111111111111111111112", "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB"]);
+// Names for token addresses the project shows (so a pair token's CA is never mistaken for "a second CA").
+async function nameTokens(addrs){
+  const list = [...new Set(addrs)].filter(isSol).slice(0, 15);
+  if (!list.length) return [];
+  const j = await req(`https://api.dexscreener.com/tokens/v1/solana/${list.join(",")}`, { ms: 5000 }).catch(() => null);
+  const seen = {};
+  for (const p of Array.isArray(j) ? j : []){
+    for (const t of [p.baseToken, p.quoteToken]) if (t?.address && list.includes(t.address) && !seen[t.address]) seen[t.address] = { ca: t.address, name: t.name, symbol: t.symbol };
+  }
+  return Object.values(seen);
 }
 
 async function solanaMint(ca){
@@ -545,7 +561,7 @@ async function tokenMeta(ca){
 const LAUNCHPAD_HOSTS = [
   [/(^|\.)pump\.fun$/, "pump.fun"], [/(^|\.)(letsbonk|bonk)\.fun$/, "LetsBonk"], [/(^|\.)bags\.fm$/, "Bags"],
   [/(^|\.)believe\.app$/, "Believe"], [/moonshot/, "Moonshot"], [/(^|\.)heaven\.xyz$/, "Heaven"], [/(^|\.)raydium\.io$/, "Raydium LaunchLab"],
-  [/(^|\.)meteora\.ag$/, "Meteora"], [/(^|\.)jup\.ag$/, "Jupiter"], [/(^|\.)boop\.fun$/, "boop.fun"], [/paid/, "Paid"], [/(^|\.)agencypad\.fun$|tryagency/, "Agency"],
+  [/(^|\.)meteora\.ag$/, "Meteora"], [/(^|\.)jup\.ag$/, "Jupiter"], [/(^|\.)boop\.fun$/, "boop.fun"], [/paid/, "Paid"], [/(^|\.)agencypad\.fun$|tryagency/, "Agency"], [/stonkfun/, "StonkFun"],
 ];
 function launchpadName(createdOn){
   if (!createdOn) return null;
@@ -562,6 +578,8 @@ const ECOSYSTEM = [
     ctx: "Not a launchpad program: a fee-routing service on top of normal pump.fun tokens. The token's creator fees are pointed to the UsePaid treasury; UsePaid claims them on a schedule and pays the X account named in the token's metadata. Split since 29 Sep 2026: 65% to the named X account, 10% UsePaid treasury, 25% buys back and burns $PAID (before: 80/20). Payouts were via X Money (paused 27 Sep 2026); since 28 Sep the named account claims by logging in with X on the UsePaid portal and giving a wallet. So: the named @account does NOT need to be involved or even know about the token — it's often someone famous who never agreed to anything. Fees reaching UsePaid is on-chain; the payout to the @account is off-chain (trust UsePaid). Own token: $PAID 98kfF7rmsg1QDUEoCqNE7g7M1FdrTt92TEp2CLzypump." },
   { name: "Agency (AgencyPad)", re: /\bagencypad\.fun\b|@tryagency\b|\btryagency\b|\bagency\s?pad\b/i, addr: ["7VertkgF9KLhxxJXHX6uaWuoYZTP9LdGj2bWmVXVpump"],
     ctx: "AI-run launchpad (Oct 2026, pump.fun-style curve). Whoever launches a coin picks an AI model (Claude, GPT, Grok…) and that AI then RUNS the coin: it writes the coin's X account (often @<Name>_agency), decides buybacks/burns, holder payouts, games or buying stuff. The launcher gets 0 creator fees — 100% go to the AI: first $20 pays its compute, $20–100 split 50/50 compute/treasury, above $100 15% of every claim buys and burns $AGENCY. The AI goes to sleep if fees are under ~0.1 SOL/hour, and early on only ~1–2% of Agency coins had an active AI. So: (1) the coin's X posts are written by an AI, not by a team and not by the real person/character it's named after; (2) anyone can launch a coin named after anyone — the name or a linked TikTok/X of a real person does NOT mean that person is involved; (3) an agencypad.fun/coin/<CA> 'website' is the launchpad's page, not a project site; (4) treasury and buybacks are run by the platform (anonymous team, single-signer custody, no audit) — trust Agency. Platform token: $AGENCY 7VertkgF9KLhxxJXHX6uaWuoYZTP9LdGj2bWmVXVpump." },
+  { name: "StonkFun", re: /\bstonkfun\b|stonkfun\.xyz|@LaunchOnSF\b|\bstonk\s?fun\b/i,
+    ctx: "Solana launchpad (since Jul 2026) where the creator picks what the coin trades AGAINST instead of SOL: tokenized stocks (xStocks by Backed: NVDAx, SPYx, QQQx…), pre-IPO tokens (PreStocks: OPENAI, ANTHROPIC…) or crypto (ZEC, WBTC, HYPE…). The pair can't change after launch. Bonding curves run on Raydium LaunchLab (since 6 Sep 2026), then a Raydium pool. Creator fees are paid in the quote asset; ~60% of platform revenue buys and burns $STONK. Pseudonymous team (@LaunchOnSF). So: the pair IS part of the narrative (\"the NVDA coin\", \"the Anthropic coin\"), the paired token's CA is not a second CA of the coin, and none of these coins is affiliated with the company behind the stock." },
   { name: "Bags", re: /\bbags\.fm\b|\bon\s+bags\b|@bagsapp/i, addr: ["FEE2tBhCKAt7shrod19QttSVREUYPiyMzoku1mL1gqVK", "FEEhPbKVKnco9EXnaY3i4R5rQVUx91wgVfu8qokixywi"],
     ctx: "Launchpad on Meteora's bonding curve. Creator gets 1% of volume forever, and fees can be shared to social handles (X, TikTok, GitHub, Kick…) that Bags holds a wallet for — the person behind the handle can claim later. Fee split is on-chain (Bags Fee Share program). A handle getting fees does NOT mean that person is part of the team." },
   { name: "Believe", re: /\bbelieve\.app\b|\blaunchcoin\b|@believeapp/i, addr: ["5qWya6UjwWnGVhdSBL3hyZ7B45jbk6Byt1hwd7ohEGXE"],
@@ -1223,9 +1241,12 @@ function buildPrompt(f, limit = 45000){
     leads_followed: f.leads?.length ? f.leads.map(l => ({ why: l.why, tool: l.tool, arg: l.arg, result: l.ok ? l.data : l.short })) : "none",
     ca_on_github: f.ghMentions || "GitHub search for the CA unavailable",
     x_replies: f.replies ? { under_post: f.replies.on, read: f.replies.read, replies: f.replies.replies } : "not read",
+    paired_with: f.market?.pairedWith?.length ? f.market.pairedWith : "SOL/USDC (a normal pair)",
+    other_token_addresses_in_project_text: f.otherTokens?.length ? f.otherTokens : "none",
+    pruf_triage: f.triage || "not run",
   };
   const pages = f.pages.map(p => `--- ${p.url} ---\n${p.text}`).join("\n\n");
-  return `You are PRUF. Your one job: decide whether what a crypto project CLAIMS is real — its TECH (apps, agents, programs, buybacks, launchpads) AND its NARRATIVE (who/what it's about, "official", "the OG", "X tweeted it", "real-world thing behind it"). Not whether the token is a good investment or will pump. Whether the story checks out.
+  const system = `You are PRUF. Your one job: decide whether what a crypto project CLAIMS is real — its TECH (apps, agents, programs, buybacks, launchpads) AND its NARRATIVE (who/what it's about, "official", "the OG", "X tweeted it", "real-world thing behind it"). Not whether the token is a good investment or will pump. Whether the story checks out.
 
 Mindset — you are an INVESTIGATOR, not a guesser. Degens trust PRUF because it digs and double-checks:
 - Absence of a link is NOT absence of evidence. Before you mark anything "no_evidence" or "busted", go through EVERY piece of evidence below that could bear on it (code, on-chain data, GitHub search, fees, dev wallet, X posts and replies) and use it.
@@ -1275,7 +1296,7 @@ Method:
    - OG status is ONE point, never split into a red and a green flag that read like a contradiction. "OG, but a later copy grew bigger" is a single fact — say it in one place, in those words. A bigger LATER copy is not a red flag for the OG (at most neutral context: the market also picked another one). say how many, when the first one launched and how big it is. Being first = green flag. Never claim "OG" without this data.
    - posts_the_coin_points_to: does the source post exist, who wrote it, before or after the coin? A real post by the real account, before launch = the narrative's source is "proven" (it doesn't mean that person is involved).
    - did_named_accounts_mention_it: the named person/brand posting the CA/ticker themselves = real link ("proven"); never posting it = no link, any "official"/"backed by" claim is "busted" (window is the last 7 days — say so).
-   - Pure meme with no claims at all: say "pure meme, nothing to larp" in the headline, report OG status and the dev, and keep claims to what's implied.
+   - Pure meme with no claims at all: see 5r — verdict "meme".
 5m. PRUF'S MEMORY (prufy_memory): earlier PRUF checks that share this dev wallet, the dev's funder, the exact site code, the exact token image or the fee wallet. funderAsDev = the wallet that funded this dev was itself a dev PRUF checked. Same dev/funder with earlier Cap/Vapor verdicts = strong red flag; with earlier Real verdicts = green flag. Same site code or same image as another project = cloned project — name it. Cite the earlier project's title and verdict.
 5n. LEADS (leads_followed): PRUF just followed these leads to double-check unverified points. Use their results as evidence, and mention them in the "checked" field of the claims they settle. A lead that couldn't be checked stays unverified — don't guess its result.
 5o. x_posts_with_this_ca: who posted the CA on X in the last 7 days (accounts, followers). Context only (KOL interest, coordinated shilling by many tiny accounts) — never proof of the tech or story.
@@ -1299,39 +1320,71 @@ TRENCH CONTEXT — think like someone who lives in the Solana trenches:
 - Red flags that actually cost people money: the site asks wallets to sign transactions for a program nobody can verify; the team can change a program that holds or moves user funds; the dev holds a big share of supply; the dev is a serial launcher whose coins all died; the token isn't provably the project's own (copycat); fake on-screen numbers; promised fees/buybacks/rewards with no wallet or program behind them; leaked keys.
 - A dev who launched many coins is NOT bad by itself — judge the track record: earlier coins that graduated or ran hard (high peak market cap) are a strong green flag; many coins that never left the bonding curve mean the dev is exposed to the "launch and leave" pattern, mention it as a caution, not as proof of a scam.
 
-Scoring: PRUF computes the score from your claim statuses — just classify each claim honestly. "verdict": "proven" (core tech exists and is used), "trust" (some real parts, core depends on their servers), "busted" (key promises contradicted by evidence), "no_evidence" (promises with nothing behind them, or almost nothing to check). Put "score":0 in the JSON.
+5q. PAIRS (paired_with): a coin that trades against something other than SOL/USDC — a tokenized stock (NVDAx, SPYx…), a pre-IPO token (ANTHROPIC, OPENAI), PUMP, another meme — is making a narrative play: "the Nvidia coin", "the Anthropic coin". Say it in the story. The paired token's CA showing up on the site or X is the PAIR, not a second CA of this coin. other_token_addresses_in_project_text names every token address the project shows: NEVER say "two CAs", "pushes another CA" or similar unless an address there is a DIFFERENT token with this coin's own name/ticker. A paired coin is not affiliated with the company behind the stock.
+5r. WHAT KIND OF COIN IS THIS — decide first, it changes everything:
+   - "meme": no concrete tech promised (just a character, a joke, a person, an event, a vibe). There is NO tech to judge, so never call it Vapor/Cap for lacking tech. verdict = "meme". The report becomes a narrative read: the story (what it is, where the meme comes from, who it's about, which meta it rides — pairs, AI agents, -inu, tribute coins…), the origin (the viral post/news/thread — use leads_followed, especially search_web results), the link to the subject, and the coin facts that matter (OG or copy, dev bag and behaviour, fees route, bundles). claims: only implied story claims that can be checked ("The OG $X", "Fees go to the Reddit guy", "Official coin of Y"), 0–3 of them. Only use verdict "busted" for a meme when it LIES (poses as official/endorsed without proof, fake partner) — then the lie is the headline.
+   - "meme_with_promises": a meme that also promises something concrete (buybacks, an AI agent running it, a game, airdrops from fees). verdict "meme" if the promises hold up or can't be checked yet and nothing contradicts them; use proven/trust/busted/no_evidence only when the promises are the main thing it sells. Judge each promise as a claim.
+   - "tech": the project sells a product/protocol. Judge it like before (proven/trust/busted/no_evidence).
+   - ORIGIN (search_web lead results): when PRUF found where the meme comes from, tell it concretely (who, where, when — "Reddit user spent $1,900 on Claude making a 3D dog; it came out a Doge–Pepe mix and went viral"). If the subject published a wallet/CA, compare it with creator_fees_onchain: fees going to that wallet = the subject is being paid (acknowledged at least); fees going elsewhere = this coin rides the story without paying the subject — say which. If several coins ride the same meme, say which one this is (the one paying the subject, the paired one, the copy).
+   - "meta": name the trend it rides in max 10 words, only if you can name it from evidence or the market context.
+   - MEME LARPS — a meme that lies is "busted" (Cap), and the lie is the headline. Check every one of these the coin claims or implies, with the evidence named:
+     · "official / endorsed / backed by <someone>" → did they post the CA/ticker (did_named_accounts_mention_it, leads)? No → busted.
+     · "<someone> tweeted/posted about it" → posts_the_coin_points_to: does the post exist, is it by that account, does it really say that, was it before launch?
+     · "fees go to <person/charity/holders>" → creator_fees_onchain recipient must match.
+     · "the OG" → og_or_copycat; "CTO / community takeover" → the dev really sold out (dev.trades) and the X/site changed hands; "LP burned / dev can't rug" → token_mint + pool facts.
+     · Stolen identity: same image or site code as an older coin (prufy_memory, og_or_copycat.sameImage) presented as new.
+     · Fake hype: x_posts_with_this_ca all from tiny accounts in a burst = coordinated shilling (mention, not proof).
+     A meme that claims nothing just gets verdict "meme" — no larp, nothing to bust.
+
+Scoring: PRUF computes the score from claim statuses — classify each claim honestly. Memes show no score.
 
 WRITING STYLE — read by degens in 5-10 seconds, on a phone, mid-trade:
-- Short, blunt, trench language (CA, dev, on-chain, rug, larp, cap, ser, bonding curve, graduated are all fine). No corporate words, no "furthermore", no hedging paragraphs.
+- Short, blunt, trench language (CA, dev, on-chain, rug, larp, cap, ser, bonding curve, graduated are all fine). No corporate words, no hedging.
 - Lead with the punchline. Numbers and facts over adjectives ("0 txs in 3 days", not "very low activity").
-- Every field has a hard word limit. Respect it. Cut, don't cram.
+- Every field has a hard word limit. Respect it. Cut, don't cram. Keep the whole report SHORT.
 
-Reply with ONLY one JSON object, English only:
-{"verdict":"trust","score":40,
- "story":"<max 35 words, plain English, no slang: what is ACTUALLY happening — who launched what, where, about whom, who runs it, is the subject involved>",
- "link":{"subject":"<who/what the coin is about, max 8 words, or empty>","relation":"official|acknowledged|tribute|impersonation|unverified|none","proof":"<max 14 words: the fact that decides the relation>"},
- "plain":"<bottom line, max 25 words, trench voice: what this really is today and the one thing that can burn you>",
- "headline":"<max 8 words, the punchline. e.g. 'AI agent is a server you can't see'>",
- "summary":"<TL;DR, max 25 words, 1-2 short sentences: what's real, what isn't>",
- "claims":[{"claim":"<the promise, max 6 words>","status":"proven|trust|busted|no_evidence","evidence":"<what PRUF found, ONE sentence, max 16 words, cite the fact>","checked":"<max 16 words: what PRUF looked at for this claim, e.g. 'Searched CA across GitHub code + PRs, read 14 replies'>","how_to_check":"<max 12 words, or 'Can't check from outside'>"}],
- "custody":{"keys":"<max 6 words, e.g. 'Team holds them'>","fees":"<max 6 words>","funds":"<max 6 words>"},
- "red_flags":["<max 6 words each, max 4 items>"],
- "green_flags":["<max 6 words each, max 4 items>"],
- "crowd":"<max 18 words: what the replies say, trench voice, e.g. 'Replies call out copied repo, team ignores it' — empty string if no replies were read>",
- "post":"<tweet under 240 chars, punchy degen voice, no hashtags/emojis, name the ticker if known>"}
-3 to 6 claims, most important first.
-
-EVIDENCE COLLECTED BY PRUF:
+Deliver the report by calling the "report" tool exactly once. English only. Fields:
+- kind: meme | meme_with_promises | tech (see 5r).
+- verdict: meme | proven | trust | busted | no_evidence. proven = core tech exists and is used; trust = some real parts, core depends on their servers; busted = key promises or the story contradicted by evidence; no_evidence = tech promises with nothing behind them.
+- headline: max 8 words, the punchline (memes: what it IS, e.g. "Reddit's $1.9k Claude dog, paired with Anthropic").
+- story: max 40 words, plain English, no slang — what is ACTUALLY happening: what the coin is about and where that comes from, who launched it, where, what it trades against, who runs it, is the subject involved.
+- origin: {what (max 14 words), where (site/platform), when (date or empty), url (or empty)} — only when PRUF found the source; otherwise omit.
+- meta: max 10 words or empty.
+- link: {subject (max 8 words or empty), relation: official|acknowledged|tribute|impersonation|unverified|none, proof (max 14 words)}.
+- plain: bottom line, max 25 words, trench voice: what this really is today and the one thing that can burn you.
+- claims: 0–4 items, most important first: {claim (max 6 words), status: proven|trust|busted|no_evidence, evidence (ONE sentence, max 16 words, cite the fact), checked (max 14 words: what PRUF looked at)}. Tech projects: 2–4 claims.
+- custody: {keys, fees, funds} max 6 words each — tech projects or when money flows through someone; omit for plain memes.
+- red_flags / green_flags: max 4 each, max 6 words each.
+- crowd: max 18 words on what replies say, or empty.
+- post: tweet under 240 chars, punchy degen voice, no hashtags/emojis, name the ticker if known.`;
+  const user = `EVIDENCE COLLECTED BY PRUF:
 ${JSON.stringify(evidence).slice(0, limit)}
 
 PROJECT'S OWN TEXT (site and docs):
 ${pages || "(no website or docs text could be read)"}`;
+  return { system, user };
 }
+
+// The report comes back as a tool call, so it's always valid JSON (no more "malformed").
+const REPORT_TOOL = { name: "report", description: "Deliver PRUF's report.", input_schema: { type: "object", properties: {
+  kind: { type: "string", enum: ["meme", "meme_with_promises", "tech"] },
+  verdict: { type: "string", enum: ["meme", "proven", "trust", "busted", "no_evidence"] },
+  headline: { type: "string" }, story: { type: "string" },
+  origin: { type: "object", properties: { what: { type: "string" }, where: { type: "string" }, when: { type: "string" }, url: { type: "string" } } },
+  meta: { type: "string" },
+  link: { type: "object", properties: { subject: { type: "string" }, relation: { type: "string", enum: ["official", "acknowledged", "tribute", "impersonation", "unverified", "none"] }, proof: { type: "string" } } },
+  plain: { type: "string" },
+  claims: { type: "array", maxItems: 4, items: { type: "object", properties: { claim: { type: "string" }, status: { type: "string", enum: ["proven", "trust", "busted", "no_evidence"] }, evidence: { type: "string" }, checked: { type: "string" } }, required: ["claim", "status", "evidence"] } },
+  custody: { type: "object", properties: { keys: { type: "string" }, fees: { type: "string" }, funds: { type: "string" } } },
+  red_flags: { type: "array", items: { type: "string" } }, green_flags: { type: "array", items: { type: "string" } },
+  crowd: { type: "string" }, post: { type: "string" },
+}, required: ["kind", "verdict", "headline", "story", "plain", "claims", "red_flags", "green_flags", "post"] } };
 
 // The score is computed, not guessed: Real 100, Trust me bro 50 (can't be checked ≠ fake), Vapor 10, Cap 0.
 // The first claims are the core promises, so they weigh a bit more.
 const CLAIM_PTS = { proven: 100, trust: 50, no_evidence: 10, busted: 0 };
 function scoreReport(r){
+  if (r?.verdict === "meme") return { ...r, score: null };
   const cl = Array.isArray(r?.claims) ? r.claims.filter(c => c && c.status in CLAIM_PTS) : [];
   if (!cl.length) return r;
   let sum = 0, w = 0;
@@ -1356,14 +1409,22 @@ function claudeKey(){
 // Busy (429 rate limit / 529 overloaded)? Don't fail: switch to the other model (separate limits) and wait in line
 // while there's still time to answer. onWait(msg) tells the user why it's slower.
 const BUSY = "Prufy is slammed right now — too many checks at once. Try again in a minute.";
-async function askClaude(prompt, ms = 45000, model = MODEL, maxTokens = 2500, onWait = null){
+// prompt: a string, or {system, user} — the system part (PRUF's fixed rules) is cached by Anthropic: faster + cheaper.
+// opts.tool: force a tool call and return its input (always valid JSON). opts.tools: extra tools (web search).
+async function askClaude(prompt, ms = 45000, model = MODEL, maxTokens = 2500, onWait = null, opts = {}){
   const end = Date.now() + ms;
+  const sys = typeof prompt === "object" ? [{ type: "text", text: prompt.system, cache_control: { type: "ephemeral" } }] : undefined;
+  const userText = typeof prompt === "object" ? prompt.user : prompt;
   let r, j, tries = 0, swapped = false;
   for (;;){
+    const body = { model, max_tokens: maxTokens, messages: [{ role: "user", content: userText }] };
+    if (sys) body.system = sys;
+    if (opts.tool){ body.tools = [opts.tool]; body.tool_choice = { type: "tool", name: opts.tool.name }; }
+    if (opts.tools) body.tools = opts.tools;
     r = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST", signal: AbortSignal.timeout(Math.max(1000, end - Date.now())),
       headers: { "content-type": "application/json", "x-api-key": claudeKey(), "anthropic-version": "2023-06-01" },
-      body: JSON.stringify({ model, max_tokens: maxTokens, messages: [{ role: "user", content: prompt }] }),
+      body: JSON.stringify(body),
     });
     j = await r.json().catch(() => ({}));
     if (r.ok || ![429, 503, 529].includes(r.status) || !onWait) break;
@@ -1379,8 +1440,19 @@ async function askClaude(prompt, ms = 45000, model = MODEL, maxTokens = 2500, on
     const hint = r.status === 401 ? ` (server sees a key starting "${k.slice(0, 10)}…", ${k.length} characters)` : "";
     throw new Error("Claude API: " + (j.error?.message || r.status) + hint);
   }
-  const out = parseJSON((j.content || []).filter(b => b.type === "text").map(b => b.text).join(""));
-  if (!out) throw new Error("The analysis came back malformed. Try again.");
+  const u = j.usage || {};
+  console.log(`[pruf] claude ${model} stop=${j.stop_reason} in=${u.input_tokens} cached=${u.cache_read_input_tokens || 0} out=${u.output_tokens}`);
+  if (opts.tool){
+    const call = (j.content || []).find(b => b.type === "tool_use" && b.name === opts.tool.name);
+    if (call?.input && typeof call.input === "object") return call.input;
+    console.log("[pruf] no tool call:", JSON.stringify(j.content || []).slice(0, 400));
+    throw new Error("The analysis came back incomplete. Try again.");
+  }
+  const texts = (j.content || []).filter(b => b.type === "text").map(b => b.text);
+  const text = texts.join("");
+  // web search answers come in several text blocks (with citations): the JSON is usually in the last ones
+  const out = parseJSON(text) || (texts.length > 1 ? parseJSON(texts.slice(-3).join("")) : null);
+  if (!out){ console.log(`[pruf] malformed (stop=${j.stop_reason}):`, text.slice(-300)); throw new Error("The analysis came back malformed. Try again."); }
   return out;
 }
 
@@ -1424,35 +1496,66 @@ const LEAD_TOOLS = {
   search_github: "search GitHub code + issues/PRs — arg: an exact string (a repo name, an address, a claimed library)",
   solana_account: "probe a Solana address on-chain (program? wallet? used?) — arg: the address",
   search_tokens: "search Solana tokens by name/ticker on DexScreener — arg: the name or ticker",
+  search_web: "search the web (Reddit, news, X, TikTok, blogs) to find where a meme/name/story comes from or who a subject is — arg: a precise search query",
 };
-async function planLeads(f, model){
-  const text = f.pages.map(p => `--- ${p.url} ---\n${p.text}`).join("\n").slice(0, 9000);
+// Triage: one fast call that decides WHAT this is (meme / meme with promises / tech), what the story stands on,
+// and which lookups are worth the time — so memes skip on-chain program probes and tech skips meme archaeology.
+async function triage(f, model){
+  const text = f.pages.map(p => `--- ${p.url} ---\n${p.text}`).join("\n").slice(0, 8000);
   const known = {
-    tech: { flags: f.tech?.flags, programs: f.tech?.programs?.length, dev: f.tech?.dev?.lines, fees: f.tech?.fees?.title, narrative: f.tech?.narrative?.lines, backend: f.tech?.backend?.level, github: f.tech?.github?.url || null },
+    token: { name: f.meta?.name || f.market?.name || null, symbol: f.meta?.symbol || f.market?.symbol || null, ca: f.ca || null, description: f.meta?.description?.slice(0, 400) || null },
+    paired_with: f.market?.pairedWith?.length ? f.market.pairedWith.map(p => p.symbol + " (" + p.name + ")") : "SOL/USDC",
+    platforms: (f.ecosystem || []).map(e => e.name), launchpad: f.launch?.launchpad?.name || null,
+    linked_accounts: f.meta?.links || [], x_bio: f.x?.bio || null,
+    tech: { flags: f.tech?.flags, github: f.tech?.github?.url || null, programs_in_code: (f.site?.solAddresses || []).length },
+    og: f.og ? { older_same_name: f.og.olderCount ?? null } : null,
     ca_on_github: f.ghMentions ? { code: f.ghMentions.codeTotal ?? null, prs: f.ghMentions.prTotal ?? null } : null,
-    replies: (f.replies?.replies || []).slice(0, 5).map(r => r.text),
-    misses: f.misses,
-    token: { name: f.meta?.name || f.market?.name || null, symbol: f.meta?.symbol || f.market?.symbol || null, ca: f.ca || null },
-    linked_accounts: f.meta?.links || [],
-    platforms: (f.ecosystem || []).map(e => e.name),
+    replies: (f.replies?.replies || []).slice(0, 4).map(r => r.text),
   };
-  const prompt = `You are PRUF's lead investigator. PRUF already collected the facts below about a crypto project. Your job: pick up to 4 follow-up lookups that would most change the verdict — specific claims or story points that are still UNVERIFIED and that one lookup could settle (a named partner, a claimed listing/integration, an "official" tie, a quoted post, a referenced address, a docs page, a rival/OG token, an accusation in the replies). Don't redo what's already done (CA GitHub search, OG search, the posts the coin links, dev wallet, fees, replies). Skip anything a lookup can't settle. Fewer is fine; [] if nothing is worth it.
-BORROWED IDENTITY: if the coin is named after or links to a real person/character/creator/brand (see linked_accounts, token name), one lead should check whether THEY (or whoever created them) ever posted this CA or ticker on X — e.g. search_x "from:<their X handle> (<CA> OR $<TICKER>)" — or who that subject is (open_url their page). Watch for lookalike names (a16z ≠ ai16z).
+  const prompt = `You are PRUF's triage. PRUF checks whether a crypto coin's story and tech are real. Decide fast, from the facts below:
+1. kind: "meme" (no concrete tech promised — a character, joke, person, event, vibe), "meme_with_promises" (a meme that also promises something concrete: buybacks, an AI agent running it, a game, airdrops), or "tech" (sells a product/protocol/app).
+2. core: max 12 words — what the coin's story stands on (e.g. "Reddit post: guy spent $1.9k on Claude for a 3D dog", "Shiba as Neo, paired with NVDAx on StonkFun").
+3. subject: who/what the coin is about (a person, character, brand, post), or "".
+4. probes: true only if the project claims its OWN on-chain program/contract/mechanism that probing addresses could prove.
+5. leads: up to 3 follow-up lookups that would most change the verdict. Don't redo what's known (CA GitHub search, OG search, linked posts, dev wallet, fees, replies).
+   - search_web is NOT a ritual (it costs time). Use it ONLY when the coin is about something from OUTSIDE crypto that the facts don't explain — a viral moment, a news story, a real person/pet/creator, a post somewhere (Reddit, TikTok, YouTube, news) — and its own site/X/metadata/linked posts don't already say where it comes from. Never for the team's own original character, a classic meme archetype (Pepe, Doge, -inu…) or a tech project. Write a precise query about the THING, not the coin (e.g. "3D dog doge pepe claude $1900 viral").
+   - MEME LARPS: if the coin's text claims something checkable — "official", "endorsed by", "X tweeted it", "fees go to <person>", "CTO", "the OG", "LP burned", "dev doxxed", a partnership — spend a lead on the strongest one.
+   - BORROWED IDENTITY: if it's named after or links to a real person/creator/brand, a lead can check whether THEY posted this CA/ticker: search_x "from:<handle> (<CA> OR $<TICKER>)". Watch for lookalikes (a16z ≠ ai16z).
+   - For tech: leads that test the main promise (a docs page, a claimed partner, an address).
 
 Tools:
 ${Object.entries(LEAD_TOOLS).map(([k, v]) => `- ${k}: ${v}`).join("\n")}
 
-Reply with ONLY JSON: {"leads":[{"why":"<max 10 words: what this settles>","tool":"<tool>","arg":"<argument>"}]}
+Reply with ONLY JSON: {"kind":"meme|meme_with_promises|tech","core":"…","subject":"…","probes":false,"leads":[{"why":"<max 10 words: what this settles>","tool":"<tool>","arg":"<argument>"}]}
 
-ALREADY KNOWN:
+FACTS:
 ${JSON.stringify(known).slice(0, 5000)}
 
-PROJECT'S OWN TEXT:
+PROJECT'S OWN TEXT (site, metadata, X posts):
 ${text || "(none)"}`;
-  const j = await askClaude(prompt, 6000, model, 600);
-  return (Array.isArray(j?.leads) ? j.leads : []).filter(l => l && LEAD_TOOLS[l.tool] && typeof l.arg === "string" && l.arg.length < 300).slice(0, 4);
+  const j = await askClaude(prompt, 6500, model, 500);
+  const kinds = ["meme", "meme_with_promises", "tech"];
+  return {
+    kind: kinds.includes(j?.kind) ? j.kind : null, core: String(j?.core || "").slice(0, 120), subject: String(j?.subject || "").slice(0, 80), probes: !!j?.probes,
+    leads: (Array.isArray(j?.leads) ? j.leads : []).filter(l => l && LEAD_TOOLS[l.tool] && typeof l.arg === "string" && l.arg.length < 300).slice(0, 3),
+  };
 }
-async function runLead(l){
+
+// Web research with Claude's own web search: where does this meme/name come from?
+async function webResearch(query, f, ms){
+  const coin = { name: f.meta?.name || f.market?.name, ticker: f.meta?.symbol || f.market?.symbol, description: f.meta?.description?.slice(0, 300), paired_with: (f.market?.pairedWith || []).map(p => p.symbol), subject: f.triage?.subject || undefined };
+  const prompt = `Research the ORIGIN of a crypto meme coin's story on the web. Coin: ${JSON.stringify(coin)}. Start with this query: ${query}
+Find: what the name/meme refers to, the original source (viral Reddit/X/TikTok post, news), who the subject/creator is, when, whether the subject publicly acknowledged a coin or posted a crypto wallet/CA, and whether several coins ride the same story. Use at most 2 searches. Be factual; if you find nothing solid, say so.
+Reply with ONLY JSON: {"found":true,"refers_to":"<max 20 words>","origin":"<max 25 words: who posted what, where>","origin_url":"","origin_date":"","subject":"","subject_acknowledged_coin":"yes|no|unknown","subject_wallet_or_ca":"","other_coins":"<max 20 words or empty>","confidence":"low|medium|high"}`;
+  const tools = [{ type: "web_search_20250305", name: "web_search", max_uses: 2 }];
+  try { return await askClaude(prompt, ms, FAST_MODEL, 900, null, { tools }); }
+  catch (e) {
+    if (!/Claude API/.test(String(e?.message))) throw e;
+    return await askClaude(prompt, Math.max(4000, ms - 2000), MODEL, 900, null, { tools }); // fast model without web search? try the main one
+  }
+}
+
+async function runLead(l, f, ms = 7000){
   const H = { authorization: `Bearer ${xToken()}` };
   switch (l.tool){
     case "open_url": {
@@ -1484,6 +1587,10 @@ async function runLead(l){
       if (!isSol(l.arg)) throw new Error("not a Solana address");
       const [p] = await probeSolana([l.arg]);
       return { short: `${p?.kind || "?"}${p?.txCount != null ? `, ${p.txCount} recent txs` : ""}`, data: p };
+    }
+    case "search_web": {
+      const r = await webResearch(l.arg, f, ms);
+      return { short: r?.found ? `found: ${String(r.origin || r.refers_to || "").slice(0, 70)}` : "nothing solid found", data: r };
     }
     case "search_tokens": {
       const j = await req(`https://api.dexscreener.com/latest/dex/search?q=${encodeURIComponent(l.arg)}`, { ms: 6000 });
@@ -1671,20 +1778,19 @@ async function run(input, send, ctx = {}){
     f.pages.push({ url: `x.com/${f.x.handle} (latest posts)`, text: xs.slice(0, 6000) });
   }
 
-  // Narrative: the posts this coin points to, and whether the people it names ever mentioned it.
-  if (left() > 25000){
+  // From here everything runs side by side: the story's sources, Prufy's memory, triage → leads (+ web search),
+  // and on-chain probes only when the coin claims on-chain tech. Memes skip the probes: faster, same answer.
+  const narrP = (async () => {
     const srcTexts = [f.meta?.twitter, f.meta?.website, f.meta?.description, f.meta?.raw ? JSON.stringify(f.meta.raw) : "", ...f.pages.map(p => p.text)];
     try { f.narrative = { sources: await narrativeSources(srcTexts, tweet?.id) }; } catch { f.narrative = { sources: [] }; }
     const projectX = (f.x?.handle || "").toLowerCase();
     const named = [...new Set([...f.narrative.sources.map(s => s.by), isPostLink(f.meta?.twitter) ? null : xHandle(f.meta?.twitter)].filter(h => h && h.toLowerCase() !== projectX))].slice(0, 2);
     const sym = f.market?.symbol || f.meta?.symbol;
-    const ms = await Promise.allSettled(named.map(h => xMentions(h, f.ca || "", sym)));
+    const ms = await Promise.allSettled(named.map(h => within(xMentions(h, f.ca || "", sym), 8000)));
     f.narrative.mentions = ms.filter(m => m.status === "fulfilled" && m.value).map(m => m.value);
     if (f.narrative.sources.length) f.narrative.sources.forEach(s => f.sources.push({ label: "Post by @" + s.by, url: "https://" + s.url }));
-  }
-
-  // Prufy's memory: have we met this dev, funder, site code, image or fee wallet before?
-  if (store){ send({ t: "step", msg: "Checking Prufy's memory" }); try { f.memory = await memoryLookup(store, f, id); } catch {} }
+  })();
+  const memP = store ? memoryLookup(store, f, id).then(m => { f.memory = m; }).catch(() => {}) : null;
 
   // Market context: which known platforms/services this project touches.
   f.ecosystem = detectEcosystem(
@@ -1692,19 +1798,48 @@ async function run(input, send, ctx = {}){
     [...(f.launch?.programsInLaunchTx || []).map(p => p.id), ...(f.launch?.dev?.topSolRecipients || []).map(r => r.to), f.launch?.dev?.address, ...(f.site?.solAddresses || [])]
   );
 
-  // On-chain probes of every Solana address the project itself references.
+  // Every Solana address the project shows: name the tokens among them (a pair token is not "a second CA").
   const allText = f.pages.map(p => p.text).join("\n");
   f.docAddresses = [...new Set([...allText.matchAll(/(?<![A-Za-z0-9])([1-9A-HJ-NP-Za-km-z]{32,44})(?![A-Za-z0-9])/g)].map(m => m[1]).filter(looksLikeKey))];
+  const namesP = f.chain === "evm" ? null : nameTokens([...f.docAddresses, ...(f.site?.solAddresses || [])].filter(a => a !== f.ca && !KNOWN[a]))
+    .then(t => { f.otherTokens = t.map(x => ({ ...x, is_this_coins_pair: !!f.market?.pairedWith?.some(p => p.ca === x.ca) })); }).catch(() => {});
+
+  // Triage: what is this, really?
+  f.tech = techSummary(f);
+  send({ t: "step", msg: "Figuring out what this is" });
+  let tri = null;
+  try { tri = await within(triage(f, FAST_MODEL), 7000); } catch (e) { log("triage skipped: " + (e?.message || e)); }
+  if (tri){
+    f.triage = { kind: tri.kind, core: tri.core, subject: tri.subject };
+    if (tri.kind) send({ t: "step", msg: (tri.kind === "tech" ? "Tech project" : tri.kind === "meme" ? "It's a meme" : "Meme with promises") + (tri.core ? ": " + tri.core : "") });
+  }
+
+  // On-chain probes — only when it claims on-chain tech of its own.
   const launchProg = f.launch?.launchProgram && isSol(f.launch.launchProgram) ? [f.launch.launchProgram] : [];
   const toProbe = [...new Set([...launchProg, ...(f.github?.declaredProgramIds || []), ...(f.site?.solAddresses || []), ...f.docAddresses])]
-    .filter(a => a !== f.ca && !KNOWN[a]).slice(0, 12);
-  if (toProbe.length && f.chain !== "evm" && left() > 30000){
+    .filter(a => a !== f.ca && !KNOWN[a] && !(f.market?.pairedWith || []).some(p => p.ca === a)).slice(0, 12);
+  let probeP = null;
+  if (toProbe.length && f.chain !== "evm" && (!tri || tri.kind !== "meme" || tri.probes)){
     send({ t: "step", msg: `Probing ${toProbe.length} address${toProbe.length > 1 ? "es" : ""} on-chain` });
-    try { f.probes = await probeSolana(toProbe); } catch (e) { f.misses.push("Solana RPC didn't answer the probes"); }
-    if (f.github?.declaredProgramIds?.length){
-      f.github.declaredIdsOnChain = f.github.declaredProgramIds.map(id => ({ id, deployed: f.probes.find(p => p.address === id)?.kind === "program" }));
-    }
+    probeP = within(probeSolana(toProbe), 12000).then(p => {
+      f.probes = p;
+      if (f.github?.declaredProgramIds?.length) f.github.declaredIdsOnChain = f.github.declaredProgramIds.map(id => ({ id, deployed: f.probes.find(x => x.address === id)?.kind === "program" }));
+    }).catch(() => f.misses.push("Solana RPC didn't answer the probes"));
   }
+
+  // Leads, web search included. The verdict keeps ~22s for itself.
+  let leadsP = null;
+  const leads = tri?.leads || [];
+  if (leads.length && left() > 26000){
+    leads.forEach(l => send({ t: "step", msg: (l.tool === "search_web" ? "Searching the web: " : "Lead: ") + l.why }));
+    const cap = l => Math.max(3000, Math.min(l.tool === "search_web" ? 14000 : 7000, left() - 22000));
+    leadsP = Promise.allSettled(leads.map(l => { const ms = cap(l); return Promise.race([runLead(l, f, ms), new Promise((_, r) => setTimeout(() => r(new Error("timed out")), ms))]); }))
+      .then(res => {
+        f.leads = leads.map((l, i) => res[i].status === "fulfilled" ? { ...l, ok: true, short: res[i].value.short, data: res[i].value.data } : { ...l, ok: false, short: "couldn't check: " + (res[i].reason?.message || "error") });
+        log(`leads: ${f.leads.map(l => l.tool + (l.ok ? "✓" : "✗")).join(" ")}`);
+      });
+  }
+  await Promise.allSettled([narrP, memP, namesP, probeP, leadsP]);
 
   // Does this token really belong to this site? (Copycat tokens are everywhere.)
   if (f.ca && site){
@@ -1720,20 +1855,6 @@ async function run(input, send, ctx = {}){
   if (f.linkage && !f.linkage.verified) f.tech.flags.unshift({ tone: "bad", text: f.linkage.tokenLinksTo
     ? `This token links to ${f.linkage.tokenLinksTo}, not ${f.linkage.site} — it may not be this project's token`
     : `No proof this token belongs to ${f.linkage.site}: the site doesn't show this CA and the token doesn't link the site` });
-  // Leads: before judging, pick what's still unverified and go check it.
-  // Only when there's time to spare: the verdict keeps ~25s for itself.
-  if (left() > 36000){
-    try {
-      send({ t: "step", msg: "Picking leads to double-check" });
-      const leads = await within(planLeads(f, FAST_MODEL), 6000);
-      if (leads.length){
-        leads.forEach(l => send({ t: "step", msg: "Lead: " + l.why }));
-        const res = await Promise.allSettled(leads.map(l => Promise.race([runLead(l), new Promise((_, r) => setTimeout(() => r(new Error("timed out")), Math.min(6000, left() - 26000)))])));
-        f.leads = leads.map((l, i) => res[i].status === "fulfilled" ? { ...l, ok: true, short: res[i].value.short, data: res[i].value.data } : { ...l, ok: false, short: "couldn't check: " + (res[i].reason?.message || "error") });
-        log(`leads: ${f.leads.map(l => l.tool + (l.ok ? "✓" : "✗")).join(" ")}`);
-      }
-    } catch (e) { log("leads skipped: " + (e?.message || e)); }
-  }
 
   const factsData = {
     ca: f.ca, chain: f.chain,
@@ -1741,6 +1862,7 @@ async function run(input, send, ctx = {}){
     website: site, x: f.x?.handle || handle, tech: f.tech, platforms: (f.ecosystem || []).map(e => e.name), basics: tokenBasics(f), sources: f.sources, misses: f.misses,
     tweet: tweet?.text ? { handle: tweet.handle, id: tweet.id, text: tweet.text.slice(0, 400) } : null,
     leads: (f.leads || []).map(l => ({ why: l.why, tool: l.tool, arg: l.arg, ok: l.ok, short: l.short })),
+    kind: f.triage?.kind || null, pairedWith: f.market?.pairedWith || [],
     replies: f.replies ? { read: f.replies.read, kept: f.replies.replies.length, on: f.replies.on } : null,
     ghMentions: f.ghMentions ? { searched: f.ghMentions.searched, code: f.ghMentions.codeTotal ?? null, prs: f.ghMentions.prTotal ?? null,
       officialMerged: f.ghMentions.code.some(c => c.official && !c.looksLikeSampleData),
@@ -1750,12 +1872,12 @@ async function run(input, send, ctx = {}){
 
   if (!f.pages.length && !f.site && !f.market) throw new Error("Couldn't find anything to check. Try the website instead of the CA, or the other way round.");
 
-  send({ t: "step", msg: "Matching promises to evidence" });
+  send({ t: "step", msg: "Writing the verdict" });
   if (left() < 10000) throw new Error("This project's sites were too slow to read. Try again in a moment.");
-  const model = left() < 40000 ? FAST_MODEL : MODEL;
+  const model = left() < 24000 ? FAST_MODEL : MODEL;
   log(`asking ${model}, ${Math.round(left() / 1000)}s left`);
   let report;
-  try { report = scoreReport(await askClaude(buildPrompt(f, left() < 25000 ? 22000 : 45000), left() - 1000, model, 2500, msg => send({ t: "step", msg }))); send({ t: "report", data: report }); log("done"); }
+  try { report = scoreReport({ ...(await askClaude(buildPrompt(f, left() < 25000 ? 22000 : 40000), left() - 1000, model, 3000, msg => send({ t: "step", msg }), { tool: REPORT_TOOL })) }); send({ t: "report", data: report }); log("done"); }
   catch (e) { if (e?.name === "TimeoutError") throw new Error("The analysis ran out of time. Try again."); throw e; }
 
   // Save it: share link + "recently checked".

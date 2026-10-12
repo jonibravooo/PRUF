@@ -39,8 +39,8 @@ Deploy to Netlify and set these environment variables:
 | `X_MAX_SHILLS` | optional | X posts read when searching who posted the CA (default 10, `0` = off) |
 | `PRUF_CA` | optional | The official $PRUF contract address shown on the site (set after launch, then redeploy) |
 | `JINA_API_KEY` | optional | Faster website reading |
-| `PRUF_RATE_LIMIT` | optional | Fresh checks per person per hour (default 6, `0` = off). Saved checks never count |
-| `OWNER_CODE` | optional | Skips the hourly limit. Open `pruf.fun/?code=<it>` once on your device |
+| `PRUF_RATE_LIMIT` | optional | Fresh checks per person per 2 hours (default 20, `0` = off). Saved checks never count |
+| `OWNER_CODE` | optional | Skips the limit. Open `pruf.fun/?code=<it>` once on your device |
 | `FEEDBACK_KEY` | optional | Read the "Did Prufy get it right?" feedback at `/api/feedback?key=<it>` |
 | `PRUF_SALT` | optional | Any random text, used to hash IPs (IPs are never stored) |
 
