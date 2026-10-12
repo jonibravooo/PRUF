@@ -41,7 +41,7 @@ Deploy to Netlify and set these environment variables:
 | `JINA_API_KEY` | optional | Faster website reading |
 | `PRUF_RATE_LIMIT` | optional | Fresh checks per person per 2 hours (default 20, `0` = off). Saved checks never count |
 | `OWNER_CODE` | optional | Skips the limit. Open `pruf.fun/?code=<it>` once on your device |
-| `FEEDBACK_KEY` | optional | Read the "Did Prufy get it right?" feedback at `/api/feedback?key=<it>` |
+| `FEEDBACK_KEY` | optional | Read the "Did Prufy get it right?" feedback at `/api/feedback?key=<it>`. Also cleans "Recently checked": `/api/reports?key=<it>&remove=<id>` or `&clear=1` |
 | `PRUF_SALT` | optional | Any random text, used to hash IPs (IPs are never stored) |
 
 Launch rush: if many people check the same thing at once, only one real check runs and the rest wait for its verdict. If Claude is rate-limited, PRUF switches to the fast model, then waits in line instead of failing.
