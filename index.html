@@ -836,7 +836,7 @@ function renderReport(r){
       const src = og.url && /^https:\/\//.test(og.url) ? el("a",{href:og.url,target:"_blank",rel:"noopener noreferrer",text:(where || "source") + " ↗"}) : where ? el("span",{text:where}) : null;
       facts2.append(el("div",{class:"sf"}, el("span",{class:"sf-k",text:"Origin"}), el("span",{class:"sf-v"}, og.what || "", src ? " — " : "", src)));
     }
-    if (pairs.length) facts2.append(el("div",{class:"sf"}, el("span",{class:"sf-k",text:"Paired with"}), el("span",{class:"sf-v",text:pairs.map(p => p.symbol + (p.name && p.name !== p.symbol ? ` (${p.name})` : "")).join(", ")})));
+    if (pairs.length) facts2.append(el("div",{class:"sf"}, el("span",{class:"sf-k",text:"Paired with"}), el("span",{class:"sf-v",text:pairs.map(p => p.symbol + (p.sameNameAsThisCoin ? ` (a different token with the same name · ${String(p.ca || "").slice(0, 4)}…${String(p.ca || "").slice(-4)})` : p.name && p.name !== p.symbol ? ` (${p.name})` : "")).join(", ")})));
     if (r.meta) facts2.append(el("div",{class:"sf"}, el("span",{class:"sf-k",text:"Meta"}), el("span",{class:"sf-v",text:r.meta})));
     if (facts2.childNodes.length) box.append(facts2);
     if (lk){ box.append(el("span",{class:"rel r-"+lk.relation}, el("span",{text:lk.subject}), el("i",{text:"→"}), el("span",{text:REL[lk.relation]}))); if (lk.proof) box.append(el("span",{class:"rel-proof",text:lk.proof})); }

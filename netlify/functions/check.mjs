@@ -441,9 +441,23 @@ async function dexscreener(ca){
     volume24h: pairs.reduce((s, p) => s + (p.volume?.h24 || 0), 0),
     websites: (withInfo.info?.websites || []).map(w => w.url), socials: (withInfo.info?.socials || []).map(s => ({ type: s.type, url: s.url })),
     // What it trades against. SOL/USDC/USDT = normal; anything else (a tokenized stock, PUMP, ANTHROPIC…) is a narrative play.
-    pairedWith: [...new Map(pairs.filter(p => p.quoteToken?.address && !STD_QUOTES.has(p.quoteToken.address) && !/^(w?SOL|USDC|USDT|USD1)$/i.test(p.quoteToken.symbol || ""))
-      .map(p => [p.quoteToken.address, { symbol: p.quoteToken.symbol, name: p.quoteToken.name, ca: p.quoteToken.address, dex: p.dexId, liquidityUsd: Math.round(p.liquidity?.usd || 0) }])).values()].slice(0, 5),
+    pairedWith: pairedWith(pairs, ca, top),
   };
+}
+// Only pools that matter: anyone can open a dust pool pairing a coin with anything, so ignore pools under $1k
+// or under 10% of the coin's liquidity, and never list the coin itself. Same-name quote tokens are flagged.
+function pairedWith(pairs, ca, top){
+  const total = pairs.reduce((s, p) => s + (p.liquidity?.usd || 0), 0);
+  const norm = x => String(x || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  const seen = new Map();
+  for (const p of pairs){
+    const q = p.quoteToken; if (!q?.address || q.address === ca || STD_QUOTES.has(q.address) || /^(w?SOL|USDC|USDT|USD1)$/i.test(q.symbol || "")) continue;
+    const liq = p.liquidity?.usd || 0;
+    if (liq < 1000 || liq < total * 0.1 || seen.has(q.address)) continue;
+    seen.set(q.address, { symbol: q.symbol, name: q.name, ca: q.address, dex: p.dexId, liquidityUsd: Math.round(liq),
+      ...((norm(q.symbol) && norm(q.symbol) === norm(top.baseToken.symbol)) || (norm(q.name) && norm(q.name) === norm(top.baseToken.name)) ? { sameNameAsThisCoin: true } : {}) });
+  }
+  return [...seen.values()].slice(0, 5);
 }
 const STD_QUOTES = new Set(["So11111111111111111111111111111111111111112", "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB"]);
 // Names for token addresses the project shows (so a pair token's CA is never mistaken for "a second CA").
@@ -465,12 +479,47 @@ async function solanaMint(ca){
   const p = v.data?.parsed?.info || {};
   const out = { program: TOKEN_PROGRAMS[v.owner] || v.owner, mintAuthority: p.mintAuthority ?? null, freezeAuthority: p.freezeAuthority ?? null,
     supply: p.supply ? Number(p.supply) / 10 ** (p.decimals || 0) : null, extensions: (p.extensions || []).map(e => e.extension) };
-  try {
-    const big = await rpc("getTokenLargestAccounts", [ca]);
-    const amts = (big?.value || []).map(a => Number(a.uiAmount || 0));
-    if (out.supply && amts.length) out.top10Pct = (amts.slice(0, 10).reduce((s, a) => s + a, 0) / out.supply) * 100;
-  } catch {}
+  try { Object.assign(out, await holderSplit(ca, out.supply)); } catch {}
   return out;
+}
+
+// Top holders WITHOUT the pools: the bonding curve and LP vaults hold most of a young coin's supply, which isn't a
+// person's bag. A token account whose owner is a program-controlled account (not a plain wallet) = pool / vault / lock.
+const AMM_PROGRAMS = {
+  "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P": "pump.fun bonding curve", pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA: "PumpSwap pool",
+  "675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8": "Raydium pool", CPMMoo8L3F4NbTegBCKVNunggL7H1ZpdTHKxQB5qKP1C: "Raydium CPMM pool", CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK: "Raydium CLMM pool",
+  LanMV9sAd7wArD4vJFi2qDdfnVhFxYSUg6eADduJ3uj: "Raydium LaunchLab curve", LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo: "Meteora DLMM pool",
+  cpamdpZCGKUy5JxQXB4dcpGPiikHawvSWAd6mEn1sGG: "Meteora DAMM pool", Eo7WjKq67rjJQSZxS6z3YkapzY3eMj6Xy8X5EQVn5UaB: "Meteora pool", dbcij3LWUppWqq96dh6gJWwBifmcGfLSB5D4DuSMaqN: "Meteora DBC curve",
+  whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc: "Orca pool",
+};
+const POOL_AUTHORITIES = { "5Q544fKrFoe6tsEbD7S8EmxGTJYAKtTVhAW5Q5pge4j1": "Raydium pool", GpMZbSM2GgvTKHJirzeGfMFoaZ8UR2X7F4v8vHTvxFbL: "Raydium CPMM pool", WLHv2UAZm6z4KyaaELi5pjdbJh6RESMva1Rnn8pJVVh: "Raydium LaunchLab curve" };
+const SYSTEM_PROGRAM = "11111111111111111111111111111111", BURN = "1nc1nerator11111111111111111111111111111111";
+async function holderSplit(ca, supply){
+  const big = await rpc("getTokenLargestAccounts", [ca]);
+  const list = (big?.value || []).slice(0, 20).map(a => ({ account: a.address, amount: Number(a.uiAmount || 0) }));
+  if (!supply || !list.length) return {};
+  const allPct = list.slice(0, 10).reduce((s, a) => s + a.amount, 0) / supply * 100;
+  try {
+    const accs = await rpc("getMultipleAccounts", [list.map(a => a.account), { encoding: "jsonParsed" }]);
+    list.forEach((a, i) => { a.owner = accs?.value?.[i]?.data?.parsed?.info?.owner || null; });
+    const owners = [...new Set(list.map(a => a.owner).filter(Boolean))];
+    const own = await rpc("getMultipleAccounts", [owners, { encoding: "base64", dataSlice: { offset: 0, length: 0 } }]);
+    const prog = Object.fromEntries(owners.map((o, i) => [o, own?.value?.[i]?.owner || null]));
+    const curve = (() => { try { return pda([Buffer.from("bonding-curve"), b58dec(ca)], PUMP); } catch { return null; } })();
+    for (const a of list){
+      const p = prog[a.owner];
+      a.kind = a.owner === BURN ? "burned" : a.owner === curve ? "pump.fun bonding curve" : POOL_AUTHORITIES[a.owner] || AMM_PROGRAMS[p] || (p && p !== SYSTEM_PROGRAM ? "program-controlled (pool/vault/lock)" : null);
+    }
+  } catch { return { top10Pct: allPct, top10IncludesPools: true }; }
+  const people = list.filter(a => !a.kind);
+  const pools = list.filter(a => a.kind);
+  return {
+    top10Pct: people.slice(0, 10).reduce((s, a) => s + a.amount, 0) / supply * 100,
+    poolsPct: pools.filter(a => a.kind !== "burned").reduce((s, a) => s + a.amount, 0) / supply * 100,
+    burnedPct: pools.filter(a => a.kind === "burned").reduce((s, a) => s + a.amount, 0) / supply * 100,
+    topHolders: people.slice(0, 5).map(a => ({ wallet: a.owner, pct: +(a.amount / supply * 100).toFixed(2) })),
+    poolAccounts: pools.slice(0, 4).map(a => ({ kind: a.kind, pct: +(a.amount / supply * 100).toFixed(2) })),
+  };
 }
 
 // The token's own metadata, written by the creator at launch: description, website, X, Telegram.
@@ -1073,7 +1122,9 @@ function tokenBasics(f){
     c.push({ label: "Freeze authority", value: m.freezeAuthority ? "Active" : "Revoked", tone: m.freezeAuthority ? "bad" : "good" });
     const risky = m.extensions.filter(e => RISKY_EXTENSIONS.includes(e));
     if (risky.length) c.push({ label: "Token-2022 extensions", value: risky.join(", "), tone: "bad" });
-    if (m.top10Pct != null) c.push({ label: "Top 10 holders", value: pct(m.top10Pct) + " (incl. pools)", tone: m.top10Pct > 50 ? "bad" : m.top10Pct > 30 ? "warn" : "good" });
+    if (m.top10Pct != null) c.push({ label: "Top 10 holders", value: pct(m.top10Pct) + (m.top10IncludesPools ? " (incl. pools)" : " (excl. pools)"), tone: m.top10IncludesPools ? "warn" : m.top10Pct > 40 ? "bad" : m.top10Pct > 25 ? "warn" : "good" });
+    if (m.poolsPct > 0.5) c.push({ label: "In pools / curve", value: pct(m.poolsPct), tone: "good" });
+    if (m.burnedPct > 0.5) c.push({ label: "Burned", value: pct(m.burnedPct), tone: "good" });
   }
   if (f.domain?.registered) c.push({ label: "Domain registered", value: ago(Date.parse(f.domain.registered)) + " ago", tone: (Date.now() - Date.parse(f.domain.registered)) / 864e5 < 30 ? "warn" : "info" });
   if (f.x) c.push({ label: "X account", value: `@${f.x.handle} · ${Number(f.x.followers || 0).toLocaleString("en")} followers` + (f.x.joined ? ` · ${ago(Date.parse(f.x.joined))} old` : ""), tone: "info" });
@@ -1311,7 +1362,7 @@ Method:
    - "story" must make a newcomer understand what's going on in one read: who launched what, on which platform, about whom, who runs it, and whether the subject is involved. Example: "Someone launched a coin on Agency named after Janie, the AI influencer made by a16z's Olivia Moore. An AI runs the coin and its X; no sign Olivia or a16z are involved."
 5d. X POSTS: the project's latest posts and pinned post are included in the project's text (when available). Promises made there count. Note if the account is silent, only shills, or its posts contradict the site.
 5. Common things that look like tech but aren't the project's own: using pump.fun / Meteora / Jupiter is real but it's someone else's tech; say so.
-6. Do NOT pad the report with token-safety items (mint authority, holders, liquidity). Mention them only if a promise depends on them.
+6. Do NOT pad the report with token-safety items (mint authority, holders, liquidity). Mention them only if a promise depends on them. token_mint.top10Pct already EXCLUDES the bonding curve, LP pools, vaults and burned tokens (poolAccounts / poolsPct / burnedPct list those) — never call a curve or pool a whale; topHolders are real wallets.
 7. Never call a project a "scam". Report evidence.
 8. Write about the PROJECT, never about PRUF's own plumbing. Never mention libraries, polyfills or third-party repos (react, core-js, wallet-adapter…) as if they mattered, never say "PRUF couldn't read X" in the headline/summary/plain, and never list a missing GitHub as a finding unless they claim to be open source. When something isn't published, say it as the project's gap ("No program address published"), not as a search failure. If the app clearly works (real wallet signing, real API calls, real on-chain txs), say so first and give it credit as a claim.
 
@@ -1320,7 +1371,7 @@ TRENCH CONTEXT — think like someone who lives in the Solana trenches:
 - Red flags that actually cost people money: the site asks wallets to sign transactions for a program nobody can verify; the team can change a program that holds or moves user funds; the dev holds a big share of supply; the dev is a serial launcher whose coins all died; the token isn't provably the project's own (copycat); fake on-screen numbers; promised fees/buybacks/rewards with no wallet or program behind them; leaked keys.
 - A dev who launched many coins is NOT bad by itself — judge the track record: earlier coins that graduated or ran hard (high peak market cap) are a strong green flag; many coins that never left the bonding curve mean the dev is exposed to the "launch and leave" pattern, mention it as a caution, not as proof of a scam.
 
-5q. PAIRS (paired_with): a coin that trades against something other than SOL/USDC — a tokenized stock (NVDAx, SPYx…), a pre-IPO token (ANTHROPIC, OPENAI), PUMP, another meme — is making a narrative play: "the Nvidia coin", "the Anthropic coin". Say it in the story. The paired token's CA showing up on the site or X is the PAIR, not a second CA of this coin. other_token_addresses_in_project_text names every token address the project shows: NEVER say "two CAs", "pushes another CA" or similar unless an address there is a DIFFERENT token with this coin's own name/ticker. A paired coin is not affiliated with the company behind the stock.
+5q. PAIRS (paired_with): a coin that trades against something other than SOL/USDC — a tokenized stock (NVDAx, SPYx…), a pre-IPO token (ANTHROPIC, OPENAI), PUMP, another meme — is making a narrative play: "the Nvidia coin", "the Anthropic coin". Say it in the story. The paired token's CA showing up on the site or X is the PAIR, not a second CA of this coin. other_token_addresses_in_project_text names every token address the project shows: NEVER say "two CAs", "pushes another CA" or similar unless an address there is a DIFFERENT token with this coin's own name/ticker. A paired coin is not affiliated with the company behind the stock. sameNameAsThisCoin=true = it trades against a DIFFERENT token with the same name (a copy, a wrapper or the "real" one) — say which is which if the evidence shows it, never call it "paired with itself".
 5r. WHAT KIND OF COIN IS THIS — decide first, it changes everything:
    - "meme": no concrete tech promised (just a character, a joke, a person, an event, a vibe). There is NO tech to judge, so never call it Vapor/Cap for lacking tech. verdict = "meme". The report becomes a narrative read: the story (what it is, where the meme comes from, who it's about, which meta it rides — pairs, AI agents, -inu, tribute coins…), the origin (the viral post/news/thread — use leads_followed, especially search_web results), the link to the subject, and the coin facts that matter (OG or copy, dev bag and behaviour, fees route, bundles). claims: only implied story claims that can be checked ("The OG $X", "Fees go to the Reddit guy", "Official coin of Y"), 0–3 of them. Only use verdict "busted" for a meme when it LIES (poses as official/endorsed without proof, fake partner) — then the lie is the headline.
    - "meme_with_promises": a meme that also promises something concrete (buybacks, an AI agent running it, a game, airdrops from fees). verdict "meme" if the promises hold up or can't be checked yet and nothing contradicts them; use proven/trust/busted/no_evidence only when the promises are the main thing it sells. Judge each promise as a claim.
