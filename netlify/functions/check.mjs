@@ -1343,7 +1343,7 @@ WRITING STYLE — read by degens in 5-10 seconds, on a phone, mid-trade:
 - Lead with the punchline. Numbers and facts over adjectives ("0 txs in 3 days", not "very low activity").
 - Every field has a hard word limit. Respect it. Cut, don't cram. Keep the whole report SHORT.
 
-Deliver the report by calling the "report" tool exactly once. English only. Fields:
+Reply with the report as one JSON object (the schema is enforced). English only. Fields:
 - kind: meme | meme_with_promises | tech (see 5r).
 - verdict: meme | proven | trust | busted | no_evidence. proven = core tech exists and is used; trust = some real parts, core depends on their servers; busted = key promises or the story contradicted by evidence; no_evidence = tech promises with nothing behind them.
 - headline: max 8 words, the punchline (memes: what it IS, e.g. "Reddit's $1.9k Claude dog, paired with Anthropic").
@@ -1366,19 +1366,21 @@ ${pages || "(no website or docs text could be read)"}`;
 }
 
 // The report comes back as a tool call, so it's always valid JSON (no more "malformed").
-const REPORT_TOOL = { name: "report", description: "Deliver PRUF's report.", input_schema: { type: "object", properties: {
+const obj = (properties, required = []) => ({ type: "object", properties, required, additionalProperties: false });
+const str = { type: "string" };
+const REPORT_SCHEMA = obj({
   kind: { type: "string", enum: ["meme", "meme_with_promises", "tech"] },
   verdict: { type: "string", enum: ["meme", "proven", "trust", "busted", "no_evidence"] },
-  headline: { type: "string" }, story: { type: "string" },
-  origin: { type: "object", properties: { what: { type: "string" }, where: { type: "string" }, when: { type: "string" }, url: { type: "string" } } },
-  meta: { type: "string" },
-  link: { type: "object", properties: { subject: { type: "string" }, relation: { type: "string", enum: ["official", "acknowledged", "tribute", "impersonation", "unverified", "none"] }, proof: { type: "string" } } },
-  plain: { type: "string" },
-  claims: { type: "array", maxItems: 4, items: { type: "object", properties: { claim: { type: "string" }, status: { type: "string", enum: ["proven", "trust", "busted", "no_evidence"] }, evidence: { type: "string" }, checked: { type: "string" } }, required: ["claim", "status", "evidence"] } },
-  custody: { type: "object", properties: { keys: { type: "string" }, fees: { type: "string" }, funds: { type: "string" } } },
-  red_flags: { type: "array", items: { type: "string" } }, green_flags: { type: "array", items: { type: "string" } },
-  crowd: { type: "string" }, post: { type: "string" },
-}, required: ["kind", "verdict", "headline", "story", "plain", "claims", "red_flags", "green_flags", "post"] } };
+  headline: str, story: str,
+  origin: obj({ what: str, where: str, when: str, url: str }),
+  meta: str,
+  link: obj({ subject: str, relation: { type: "string", enum: ["official", "acknowledged", "tribute", "impersonation", "unverified", "none"] }, proof: str }),
+  plain: str,
+  claims: { type: "array", items: obj({ claim: str, status: { type: "string", enum: ["proven", "trust", "busted", "no_evidence"] }, evidence: str, checked: str }, ["claim", "status", "evidence"]) },
+  custody: obj({ keys: str, fees: str, funds: str }),
+  red_flags: { type: "array", items: str }, green_flags: { type: "array", items: str },
+  crowd: str, post: str,
+}, ["kind", "verdict", "headline", "story", "plain", "claims", "red_flags", "green_flags", "post"]);
 
 // The score is computed, not guessed: Real 100, Trust me bro 50 (can't be checked ≠ fake), Vapor 10, Cap 0.
 // The first claims are the core promises, so they weigh a bit more.
@@ -1410,25 +1412,37 @@ function claudeKey(){
 // while there's still time to answer. onWait(msg) tells the user why it's slower.
 const BUSY = "Prufy is slammed right now — too many checks at once. Try again in a minute.";
 // prompt: a string, or {system, user} — the system part (PRUF's fixed rules) is cached by Anthropic: faster + cheaper.
-// opts.tool: force a tool call and return its input (always valid JSON). opts.tools: extra tools (web search).
+// opts.schema: the answer must match this JSON schema. Newer models (Sonnet 5.5+) get structured outputs + low
+// up-front thinking (they think hard by default, which is slow and eats max_tokens); older ones (Haiku 4.5) get a
+// forced tool call. Either way the answer is valid JSON. opts.tools: extra tools (web search). opts.effort: low|medium|high.
+// If the API rejects a newer option, PRUF retries once in plain mode instead of failing the check.
+const legacyModel = m => /haiku-4|sonnet-4|opus-4|claude-3/.test(m);
 async function askClaude(prompt, ms = 45000, model = MODEL, maxTokens = 2500, onWait = null, opts = {}){
   const end = Date.now() + ms;
   const sys = typeof prompt === "object" ? [{ type: "text", text: prompt.system, cache_control: { type: "ephemeral" } }] : undefined;
   const userText = typeof prompt === "object" ? prompt.user : prompt;
-  let r, j, tries = 0, swapped = false;
+  let r, j, tries = 0, swapped = false, step = 0, mode = "";
+  const modes = () => opts.schema ? (legacyModel(model) ? ["tool", "plain"] : ["format", "light", "plain"]) : (legacyModel(model) ? ["plain"] : ["light", "plain"]);
   for (;;){
     const body = { model, max_tokens: maxTokens, messages: [{ role: "user", content: userText }] };
     if (sys) body.system = sys;
-    if (opts.tool){ body.tools = [opts.tool]; body.tool_choice = { type: "tool", name: opts.tool.name }; }
     if (opts.tools) body.tools = opts.tools;
+    const ms_ = modes(); mode = ms_[Math.min(step, ms_.length - 1)];
+    if (mode === "tool"){ body.tools = [{ name: "answer", description: "Deliver the answer.", input_schema: opts.schema }]; body.tool_choice = { type: "tool", name: "answer" }; }
+    if (mode === "format" || mode === "light"){
+      body.thinking = { type: "between_tools" };
+      body.output_config = { effort: opts.effort || "medium", ...(mode === "format" ? { format: { type: "json_schema", schema: opts.schema } } : {}) };
+    }
+    if ((mode === "plain" || mode === "light") && opts.schema) body.messages[0].content = userText + "\n\nReply with ONLY one JSON object matching this schema, no other text: " + JSON.stringify(opts.schema);
     r = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST", signal: AbortSignal.timeout(Math.max(1000, end - Date.now())),
       headers: { "content-type": "application/json", "x-api-key": claudeKey(), "anthropic-version": "2023-06-01" },
       body: JSON.stringify(body),
     });
     j = await r.json().catch(() => ({}));
+    if (r.status === 400 && mode !== "plain" && end - Date.now() > 8000){ console.log(`[pruf] ${model} rejected ${mode} mode: ${j.error?.message}`); step++; continue; }
     if (r.ok || ![429, 503, 529].includes(r.status) || !onWait) break;
-    if (!swapped && model !== FAST_MODEL){ swapped = true; model = FAST_MODEL; onWait("Lots of checks right now — switching to the fast lane"); continue; }
+    if (!swapped && model !== FAST_MODEL){ swapped = true; model = FAST_MODEL; step = 0; onWait("Lots of checks right now — switching to the fast lane"); continue; }
     const wait = Math.min(Math.max(2000, Number(r.headers.get("retry-after")) * 1000 || 2500 + Math.random() * 3000), 8000);
     if (end - Date.now() - wait < 15000) throw new Error(BUSY);
     if (!tries++) onWait("Prufy is busy — you're in line");
@@ -1441,18 +1455,19 @@ async function askClaude(prompt, ms = 45000, model = MODEL, maxTokens = 2500, on
     throw new Error("Claude API: " + (j.error?.message || r.status) + hint);
   }
   const u = j.usage || {};
-  console.log(`[pruf] claude ${model} stop=${j.stop_reason} in=${u.input_tokens} cached=${u.cache_read_input_tokens || 0} out=${u.output_tokens}`);
-  if (opts.tool){
-    const call = (j.content || []).find(b => b.type === "tool_use" && b.name === opts.tool.name);
+  console.log(`[pruf] claude ${model} mode=${mode} stop=${j.stop_reason} in=${u.input_tokens} cached=${u.cache_read_input_tokens || 0} out=${u.output_tokens}`);
+  if (mode === "tool"){
+    const call = (j.content || []).find(b => b.type === "tool_use" && b.name === "answer");
     if (call?.input && typeof call.input === "object") return call.input;
-    console.log("[pruf] no tool call:", JSON.stringify(j.content || []).slice(0, 400));
-    throw new Error("The analysis came back incomplete. Try again.");
   }
   const texts = (j.content || []).filter(b => b.type === "text").map(b => b.text);
   const text = texts.join("");
   // web search answers come in several text blocks (with citations): the JSON is usually in the last ones
   const out = parseJSON(text) || (texts.length > 1 ? parseJSON(texts.slice(-3).join("")) : null);
-  if (!out){ console.log(`[pruf] malformed (stop=${j.stop_reason}):`, text.slice(-300)); throw new Error("The analysis came back malformed. Try again."); }
+  if (!out){
+    console.log(`[pruf] unreadable answer (mode=${mode}, stop=${j.stop_reason}):`, text.slice(-300));
+    throw new Error(j.stop_reason === "max_tokens" ? "The analysis ran too long. Try again." : "The analysis came back malformed. Try again.");
+  }
   return out;
 }
 
@@ -1533,7 +1548,7 @@ ${JSON.stringify(known).slice(0, 5000)}
 
 PROJECT'S OWN TEXT (site, metadata, X posts):
 ${text || "(none)"}`;
-  const j = await askClaude(prompt, 6500, model, 500);
+  const j = await askClaude(prompt, 6500, model, 900, null, { effort: "low" });
   const kinds = ["meme", "meme_with_promises", "tech"];
   return {
     kind: kinds.includes(j?.kind) ? j.kind : null, core: String(j?.core || "").slice(0, 120), subject: String(j?.subject || "").slice(0, 80), probes: !!j?.probes,
@@ -1548,10 +1563,10 @@ async function webResearch(query, f, ms){
 Find: what the name/meme refers to, the original source (viral Reddit/X/TikTok post, news), who the subject/creator is, when, whether the subject publicly acknowledged a coin or posted a crypto wallet/CA, and whether several coins ride the same story. Use at most 2 searches. Be factual; if you find nothing solid, say so.
 Reply with ONLY JSON: {"found":true,"refers_to":"<max 20 words>","origin":"<max 25 words: who posted what, where>","origin_url":"","origin_date":"","subject":"","subject_acknowledged_coin":"yes|no|unknown","subject_wallet_or_ca":"","other_coins":"<max 20 words or empty>","confidence":"low|medium|high"}`;
   const tools = [{ type: "web_search_20250305", name: "web_search", max_uses: 2 }];
-  try { return await askClaude(prompt, ms, FAST_MODEL, 900, null, { tools }); }
+  try { return await askClaude(prompt, ms, FAST_MODEL, 1500, null, { tools, effort: "low" }); }
   catch (e) {
     if (!/Claude API/.test(String(e?.message))) throw e;
-    return await askClaude(prompt, Math.max(4000, ms - 2000), MODEL, 900, null, { tools }); // fast model without web search? try the main one
+    return await askClaude(prompt, Math.max(4000, ms - 2000), MODEL, 2500, null, { tools, effort: "low" }); // fast model without web search? try the main one
   }
 }
 
@@ -1877,7 +1892,7 @@ async function run(input, send, ctx = {}){
   const model = left() < 24000 ? FAST_MODEL : MODEL;
   log(`asking ${model}, ${Math.round(left() / 1000)}s left`);
   let report;
-  try { report = scoreReport({ ...(await askClaude(buildPrompt(f, left() < 25000 ? 22000 : 40000), left() - 1000, model, 3000, msg => send({ t: "step", msg }), { tool: REPORT_TOOL })) }); send({ t: "report", data: report }); log("done"); }
+  try { report = scoreReport({ ...(await askClaude(buildPrompt(f, left() < 25000 ? 22000 : 40000), left() - 1000, model, 6000, msg => send({ t: "step", msg }), { schema: REPORT_SCHEMA, effort: "medium" })) }); send({ t: "report", data: report }); log("done"); }
   catch (e) { if (e?.name === "TimeoutError") throw new Error("The analysis ran out of time. Try again."); throw e; }
 
   // Save it: share link + "recently checked".
